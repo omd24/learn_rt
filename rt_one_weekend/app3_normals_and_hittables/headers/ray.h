@@ -1,6 +1,6 @@
 #pragma once
 
-#include "vec3.h"
+#include "headers/vec3.h"
 
 typedef struct {
     point3 origin;

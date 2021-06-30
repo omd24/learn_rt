@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "app1_ppm", "app1_ppm\app1_p
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "app2_ray_sphere", "app2_ray_sphere\app2_ray_sphere.vcxproj", "{9C566A61-021E-4322-9B74-CDFE9DBD040B}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "app3_normals_and_hittables", "app3_normals_and_hittables\app3_normals_and_hittables.vcxproj", "{FFF5052A-F25B-479E-B854-EA09B07BB483}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -31,6 +33,14 @@ Global
 		{9C566A61-021E-4322-9B74-CDFE9DBD040B}.Release|x64.Build.0 = Release|x64
 		{9C566A61-021E-4322-9B74-CDFE9DBD040B}.Release|x86.ActiveCfg = Release|Win32
 		{9C566A61-021E-4322-9B74-CDFE9DBD040B}.Release|x86.Build.0 = Release|Win32
+		{FFF5052A-F25B-479E-B854-EA09B07BB483}.Debug|x64.ActiveCfg = Debug|x64
+		{FFF5052A-F25B-479E-B854-EA09B07BB483}.Debug|x64.Build.0 = Debug|x64
+		{FFF5052A-F25B-479E-B854-EA09B07BB483}.Debug|x86.ActiveCfg = Debug|Win32
+		{FFF5052A-F25B-479E-B854-EA09B07BB483}.Debug|x86.Build.0 = Debug|Win32
+		{FFF5052A-F25B-479E-B854-EA09B07BB483}.Release|x64.ActiveCfg = Release|x64
+		{FFF5052A-F25B-479E-B854-EA09B07BB483}.Release|x64.Build.0 = Release|x64
+		{FFF5052A-F25B-479E-B854-EA09B07BB483}.Release|x86.ActiveCfg = Release|Win32
+		{FFF5052A-F25B-479E-B854-EA09B07BB483}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

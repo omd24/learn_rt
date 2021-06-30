@@ -1,56 +1,49 @@
 /* ===========================================================
-   #File: ray_sphere.c #
-   #Date: 29 June 2021 #
+   #File: sphere_with_ground.c #
+   #Date: 30 June 2021 #
    #Revision: 1.0 #
    #Creator: Omid Miresmaeili #
-   #Description: ray sphere interesection #
-   # First raytraced image #
+   #Description: A normals-colored sphere with ground #
    #Notice: (C) Copyright 2021 by Omid. All Rights Reserved. #
    =========================================================== */
 
-#include "headers/ray.h"
-#include "headers/vec3.h"
-
-#include <stdio.h>
-#include <stdbool.h>
+#include "headers/common.h"
 
 // NOTE(omid): To output the result of the program to .ppm instead of console: 
-// app2_ray_sphere.exe > image.ppm
+// app3_normals_and_hittables.exe > image.ppm
 
 //
-// solves the eq: (t*t)B.B + 2tB.(A-C) + (A-C).(A-C) - r2 = 0
-// ray: A + tB
-// sphere: C (center), r (radius)
-// discriminant: b*b - 4*a*c
-static bool
-hit_sphere (point3 * center, float radius, ray * r) {
-    vec3f oc = vec3_sub(r->origin, *center);
-    float a = vec3_mul_dot(r->dir, r->dir);
-    float b = 2.0f * vec3_mul_dot(oc, r->dir);
-    float c = vec3_mul_dot(oc, oc) - radius * radius;
-    float discriminant = b * b - 4 * a * c;
-    return (discriminant > 0);
-}
+// linearly blend color1 and color2 based on t parameter
 static color
-ray_color (ray * r) {
-    //
-    // color red to mark ray-sphere intersection
-    // center = (0,0,-1), radius = 0.5
-    if (hit_sphere(&(point3) { 0, 0, -1 }, .5f, r))
-        return (color) { 1, 0, 0 };
+blend_lin (color c1, color c2, float t) {
+    color ret;
 
-    // 
-    // bg: linearly blends white and blue depending on ray.y value (height)
-    vec3f unit_dir = vec3_normalize(r->dir);
-    float t = 0.5f * (unit_dir.y + 1.0f);
+    c1 = vec3_scale(c1, (1.0f - t));
+    c2 = vec3_scale(c2, t);
 
-    color white = {1.0f, 1.0f, 1.0f};
-    white = vec3_scale(white, (1.0f - t));
-    color blue = {.5f, .7f, 1.0f};
-    blue = vec3_scale(blue, t);
-
-    return vec3_add(white, blue);
+    ret = vec3_add(c1, c2);
+    return ret;
 }
+//
+// compute ray color based on hitting an obj or not (bg)
+// TODO(omid): make hittable_list inherit from hittable to use a hittable here
+static color
+ray_color (ray * r, hittable_list * hlist) {
+    color ret;
+    hit_record rec;
+    if (hlist_hit(hlist, r, 0, g_infinity, &rec)) {
+        color normals_colored = vec3_add(rec.normal, (color){1,1,1});
+        ret = vec3_scale(normals_colored, 0.5f);
+    } else {            // bg: blend white and blue based on ray.y
+        vec3f unit_dir = vec3_normalize(r->dir);
+        float wt = 0.5f * (unit_dir.y + 1.0f);
+        color white = {1.0f, 1.0f, 1.0f};
+        color blue = {.5f, .7f, 1.0f};
+        ret = blend_lin(white, blue, wt);
+    }
+    return ret;
+}
+//
 // translate [0.f, 1.f] to [0, 255]
 static void
 write_color (int out_color[3], color pixel_color) {
@@ -63,6 +56,18 @@ int main () {
     float aspect_ratio = 16.f / 9.f;
     int width = 400;
     int height = (int)(width / aspect_ratio);
+
+    // -- world setup
+    int const world_cap = 10;
+    byte * world_memory = malloc(hlist_size(world_cap));
+    hittable_list * world = hlist_init(world_memory, world_cap);
+
+    sphere s1 = {0};
+    sphere s2 = {0};
+    sphere_init(&s1, (point3){0.0f, 0.0f, -1.0f}, 0.5f);
+    sphere_init(&s2, (point3){0.0f, -100.5f, -1.0f}, 100.0f);
+    hlist_add(world, (hittable *)&s1);
+    hlist_add(world, (hittable *)&s2);
 
     // -- camera setup
     float viewport_h = 2.f;
@@ -94,7 +99,7 @@ int main () {
                 .dir = dir,
                 .origin = origin
             };
-            color pixel_color = ray_color(&r);
+            color pixel_color = ray_color(&r, world);
             int icolor[3] = {0};
             write_color(icolor, pixel_color);
             printf("%d %d %d\n", icolor[0], icolor[1], icolor[2]);
@@ -103,3 +108,4 @@ int main () {
 
     return(0);
 }
+
