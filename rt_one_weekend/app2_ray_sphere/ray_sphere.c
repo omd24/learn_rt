@@ -36,7 +36,7 @@ ray_color (ray * r) {
     //
     // color red to mark ray-sphere intersection
     // center = (0,0,1), radius = 0.5
-    if (hit_sphere(&(point3) { 0, 0, 1 }, .5f, r))
+    if (hit_sphere(&(point3) { 0, 0, -1 }, .5f, r))
         return (color) { 1, 0, 0 };
 
     // 
