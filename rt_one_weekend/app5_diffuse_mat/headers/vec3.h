@@ -120,3 +120,14 @@ random_vec3_in_unit_sphere () {
     }
     return ret;
 }
+inline vec3f
+random_unit_vector () {
+    return vec3_normalize(random_vec3_in_unit_sphere());
+}
+inline vec3f
+random_in_hemisphere (vec3f normal) {
+    vec3f ret = random_unit_vector();
+    if (vec3_mul_dot(ret, normal) <= 0)     // if not in the same hemisphere
+        ret = vec3_scale(ret, -1.0f);
+    return ret;
+}

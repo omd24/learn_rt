@@ -33,7 +33,10 @@ ray_color (ray * r, hittable_list * hlist, int depth) {
     hit_record rec;
     if (depth > 0) {
         if (hlist_hit(hlist, r, 0.001f /*Fixing Shadow Acne*/, g_infinity, &rec)) {
-            point3 target = vec3_addvarg(3, rec.p, rec.normal, random_vec3_in_unit_sphere());
+            /* Method-1 */
+            //point3 target = vec3_addvarg(3, rec.p, rec.normal, random_unit_vector());
+            /* Method-2 */
+            point3 target = vec3_add(rec.p, random_in_hemisphere(rec.normal));
             ray child_ray = {.origin = rec.p, .dir = vec3_sub(target, rec.p)};
             color child_ray_color = ray_color(&child_ray, hlist, depth - 1);
             ret = vec3_scale(child_ray_color, 0.5f);
