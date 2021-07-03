@@ -12,7 +12,7 @@
 #include "headers/common.h"
 
 // NOTE(omid): To output the result of the program to .ppm instead of console: 
-// app3_normals_and_hittables.exe > image.ppm
+// app4_antialiasing.exe > image.ppm
 
 //
 // linearly blend color1 and color2 based on t parameter

@@ -1,16 +1,16 @@
 /* ===========================================================
-   #File: diffuse_sphere.c #
-   #Date: 02 July 2021 #
+   #File: metal_spheres.c #
+   #Date: 00 Month 2021 #
    #Revision: 1.0 #
    #Creator: Omid Miresmaeili #
-   #Description: Rendering of diffuse spheres #
+   #Description: Rendering metal spheres with fuzziness #
    #Notice: (C) Copyright 2021 by Omid. All Rights Reserved. #
    =========================================================== */
 
 #include "headers/common.h"
 
 // NOTE(omid): To output the result of the program to .ppm instead of console: 
-// app5_diffuse_mat.exe > image.ppm
+// app6_fuzzed_metal.exe > image.ppm
 
 //
 // linearly blend color1 and color2 based on t parameter                           
@@ -33,13 +33,10 @@ ray_color (ray * r, hittable_list * hlist, int depth) {
     hit_record rec;
     if (depth > 0) {
         if (hlist_hit(hlist, r, 0.001f /*Fixing Shadow Acne*/, g_infinity, &rec)) {
-            /* Method-1 */
-            //point3 target = vec3_addvarg(3, rec.p, rec.normal, random_unit_vector());
-            /* Method-2 */
-            point3 target = vec3_add(rec.p, random_in_hemisphere(rec.normal));
-            ray child_ray = {.origin = rec.p, .dir = vec3_sub(target, rec.p)};
-            color child_ray_color = ray_color(&child_ray, hlist, depth - 1);
-            ret = vec3_scale(child_ray_color, 0.5f);
+            ray scattered;
+            color attenuation;
+            if (material_scatter(rec.mat_ptr, r, &rec, &attenuation, &scattered))
+                ret = vec3_mul_elementwise(ray_color(&scattered, hlist, depth - 1), attenuation);
         } else {    // bg: blend white and blue based on ray.y
             vec3f unit_dir = vec3_normalize(r->dir);
             float wt = 0.5f * (unit_dir.y + 1.0f);
@@ -79,10 +76,15 @@ int main () {
     byte * world_memory = malloc(hlist_size(world_cap));
     hittable_list * world = hlist_init(world_memory, world_cap);
 
+    lambertian mat_ground;
+    lambertian_init(&mat_ground, (color) { 0.8f, 0.8f, 0.0f });
+    metal mat_left;
+    metal_init(&mat_left, (color) { 0.8f, 0.8f, 0.8f });
+
     sphere s1 = {0};
     sphere s2 = {0};
-    sphere_init(&s1, (point3) { 0.0f, 0.0f, -1.0f }, 0.5f);
-    sphere_init(&s2, (point3) { 0.0f, -100.5f, -1.0f }, 100.0f);
+    sphere_init(&s1, (point3) { 0.0f, 0.0f, -1.0f }, 0.5f, (material *)(&mat_left));
+    sphere_init(&s2, (point3) { 0.0f, -100.5f, -1.0f }, 100.0f, (material *)(&mat_ground));
     hlist_add(world, (hittable *)&s1);
     hlist_add(world, (hittable *)&s2);
 
