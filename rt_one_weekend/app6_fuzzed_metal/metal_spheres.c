@@ -78,15 +78,25 @@ int main () {
 
     lambertian mat_ground;
     lambertian_init(&mat_ground, (color) { 0.8f, 0.8f, 0.0f });
+    lambertian mat_center;
+    lambertian_init(&mat_center, (color) { 0.7f, 0.3f, 0.3f });
     metal mat_left;
-    metal_init(&mat_left, (color) { 0.8f, 0.8f, 0.8f });
+    metal_init(&mat_left, (color) { 0.8f, 0.8f, 0.8f }, 0.3f);
+    metal mat_right;
+    metal_init(&mat_right, (color) { 0.8f, 0.6f, 0.2f }, 1.0f);
 
     sphere s1 = {0};
     sphere s2 = {0};
-    sphere_init(&s1, (point3) { 0.0f, 0.0f, -1.0f }, 0.5f, (material *)(&mat_left));
-    sphere_init(&s2, (point3) { 0.0f, -100.5f, -1.0f }, 100.0f, (material *)(&mat_ground));
+    sphere s3 = {0};
+    sphere s4 = {0};
+    sphere_init(&s1, (point3) { 0.0f, -100.5f, -1.0f }, 100.0f, (material *)(&mat_ground));
+    sphere_init(&s2, (point3) { 0.0f, 0.0f, -1.0f }, 0.5f, (material *)(&mat_center));
+    sphere_init(&s3, (point3) { -1.0f, 0.0f, -1.0f }, 0.5f, (material *)(&mat_left));
+    sphere_init(&s4, (point3) { 1.0f, 0.0f, -1.0f }, 0.5f, (material *)(&mat_right));
     hlist_add(world, (hittable *)&s1);
     hlist_add(world, (hittable *)&s2);
+    hlist_add(world, (hittable *)&s3);
+    hlist_add(world, (hittable *)&s4);
 
     // -- camera setup
     float viewport_h = 2.f;

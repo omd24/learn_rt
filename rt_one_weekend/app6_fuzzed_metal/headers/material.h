@@ -67,7 +67,7 @@ typedef struct {
     material super;
 
     color albedo;
-
+    float fuzziness;
 } metal;
 //
 // overriding virtual function
@@ -77,16 +77,17 @@ metal_scatter (material * me, ray * r_in, hit_record * rec, color * attenuation,
     metal * m = (metal *)me;  /* explicit downcast */
     vec3f reflected = vec3_reflect(vec3_normalize(r_in->dir), rec->normal);
     r_scatterd->origin = rec->p;
-    r_scatterd->dir = reflected;
+    r_scatterd->dir = vec3_add(reflected, vec3_scale(random_vec3_in_unit_sphere(),  m->fuzziness));
     *attenuation = m->albedo;
     ret = (vec3_mul_dot(r_scatterd->dir, rec->normal) > 0);
     return ret;
 }
 inline void
-metal_init (metal * me, color a) {
+metal_init (metal * me, color a, float fuzz) {
     static struct MatVtbl vtbl = {  /* metal vtable */
         .scatter = metal_scatter
     };
     me->super.vptr = &vtbl;
     me->albedo = a;
+    me->fuzziness = fuzz < 1 ? fuzz : 1;
 }
