@@ -64,7 +64,6 @@ write_color (int out_color[3], color pixel_color, int samples_per_pixel) {
         out_color[i] = (int)(256 * clamp(pixel_color.E[i], 0.0f, 0.999f));
 }
 int main () {
-
     // -- image setup
     float aspect_ratio = 16.f / 9.f;
     int width = 400;
@@ -84,7 +83,7 @@ int main () {
     dielectric mat_left;
     dielectric_init(&mat_left, 1.5f);
     metal mat_right;
-    metal_init(&mat_right, (color) { 0.8f, 0.6f, 0.2f }, 1.0f);
+    metal_init(&mat_right, (color) { 0.8f, 0.6f, 0.2f }, 0.0f);
 
     sphere s1 = {0};
     sphere s2 = {0};
@@ -93,12 +92,10 @@ int main () {
     sphere s5 = {0};
     sphere_init(&s1, (point3) { 0.0f, -100.5f, -1.0f }, 100.0f, (material *)(&mat_ground));
     sphere_init(&s2, (point3) { 0.0f, 0.0f, -1.0f }, 0.5f, (material *)(&mat_center));
-    
-    sphere_init(&s3, (point3) { -1.0f, 0.0f, -1.0f }, 0.5f, (material *)(&mat_left));
-    /* a trick with dielectric spheres is to use a negative radius (normals point inward) to make hollow glass spheres */
-    sphere_init(&s4, (point3) { -1.0f, 0.0f, -1.0f }, -0.4f, (material *)(&mat_left));
+    sphere_init(&s3, (point3) { -1.f, 0.0f, -1.0f }, 0.5f, (material *)(&mat_left));
+    sphere_init(&s4, (point3) { -1.f, 0.0f, -1.0f }, -.45f, (material *)(&mat_left));
+    sphere_init(&s5, (point3) { 1.0, 0.0f, -1.0f }, 0.5f, (material *)(&mat_right));
 
-    sphere_init(&s5, (point3) { 1.0f, 0.0f, -1.0f }, 0.5f, (material *)(&mat_right));
     hlist_add(world, (hittable *)&s1);
     hlist_add(world, (hittable *)&s2);
     hlist_add(world, (hittable *)&s3);
@@ -106,14 +103,17 @@ int main () {
     hlist_add(world, (hittable *)&s5);
 
     // -- camera setup
-    float viewport_h = 2.f;
-    float viewport_w = aspect_ratio * viewport_h;
-    float focal_length = 1.f;   // camera distance from proj plane
-    // NOTE(omid): Not to be confused with "focus distance" which is distance at which objects appear in perfect focus
     camera cam = {0};
-    camera_init(&cam, viewport_w, viewport_h, focal_length);
+    point3 lookfrom = {-2.f,2.f,1.f};
+    point3 lookto = {0.f,0.f,-1.f};
+    vec3f vup = {0.f,1.f,0.f};
+    camera_init(
+        &cam,
+        lookfrom, lookto, vup,
+        20.0f, aspect_ratio
+    );
 
-    // -- render
+        // -- render
     printf("P3\n%d %d\n255\n", width, height);
     for (int j = height - 1; j >= 0; --j) {
         fprintf(stderr, "\nScanlines remaining: %d", j);
