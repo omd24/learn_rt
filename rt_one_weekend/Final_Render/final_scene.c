@@ -66,10 +66,11 @@ int main () {
     //
     // -- image setup
     float aspect_ratio = 3.f / 2.f;
-    int width = 1200;
+    int width = 400;
     int height = (int)(width / aspect_ratio);
-    int samples_per_pixel = 100;
+    int samples_per_pixel = 500;
     int max_depth = 50;
+    int * image_colors = calloc(height * width, 3 * sizeof(int));;
 
     //
     // -- world setup
@@ -155,22 +156,41 @@ int main () {
     printf("P3\n%d %d\n255\n", width, height);
 
     int j;
-
+    int k = 0;
     for (j = height - 1; j >= 0; --j) {
         fprintf(stderr, "\nScanlines remaining: %d", j);
         //fflush(stdout); // Will now print everything in the stdout buffer
         for (int i = 0; i < width; ++i) {
             color pixel_color = {0,0,0};
             int s;
-            for (s = 0; s < samples_per_pixel; ++s) {
-                float u = (float)(i + random_float()) / (width - 1);
-                float v = (float)(j + +random_float()) / (height - 1);
-                ray r = camera_cast_ray(&cam, u, v);
-                pixel_color = vec3_add(pixel_color, ray_color(&r, world, max_depth));
-            }
-            int icolor[3] = {0};
-            write_color(icolor, pixel_color, samples_per_pixel);
-            printf("%d %d %d\n", icolor[0], icolor[1], icolor[2]);
+
+//#pragma omp parallel    
+//            {
+//#pragma omp for
+
+                for (s = 0; s < samples_per_pixel; ++s) {
+                    float u = (float)(i + random_float()) / (width - 1);
+                    float v = (float)(j + +random_float()) / (height - 1);
+                    ray r = camera_cast_ray(&cam, u, v);
+                    pixel_color = vec3_add(pixel_color, ray_color(&r, world, max_depth));
+                }
+
+            //}   // end omp parallel
+
+            write_color(&image_colors[k], pixel_color, samples_per_pixel);
+            k += 3;
+        }
+    }
+
+    //
+    // -- output results
+    k = 0;
+    for (j = height - 1; j >= 0; --j) {
+        fprintf(stderr, "\nScanlines remaining: %d", j);
+        //fflush(stdout); // Will now print everything in the stdout buffer
+        for (int i = 0; i < width; ++i) {
+            printf("%d %d %d\n", image_colors[k], image_colors[k + 1], image_colors[k + 2]);
+            k += 3;
         }
     }
 
