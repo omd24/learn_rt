@@ -44,5 +44,11 @@
     <ClCompile Include="final_scene.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="final_scene_mt_win32.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="final_scene_omp.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

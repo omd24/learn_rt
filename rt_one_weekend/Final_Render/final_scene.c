@@ -3,7 +3,7 @@
    #Date: 05 July 2021 #
    #Revision: 1.0 #
    #Creator: Omid Miresmaeili #
-   #Description: A final render wrapping up RT in one weekend #
+   #Description: A final render wrapping up RT in one weekend (Singlethreaded) #
    #Notice: (C) Copyright 2021 by Omid. All Rights Reserved. #
    =========================================================== */
 
@@ -28,17 +28,17 @@ blend_lin (color c1, color c2, float t) {
 // compute ray color based on hitting an obj or not (bg)
 // TODO(omid): make hittable_list inherit from hittable to use a hittable here
 static color
-ray_color (ray * r, hittable_list * hlist, int depth) {
+ray_color (ray r, hittable_list * hlist, int depth) {
     color ret = {0,0,0};
     hit_record rec;
     if (depth > 0) {
-        if (hlist_hit(hlist, r, 0.001f /*Fixing Shadow Acne*/, g_infinity, &rec)) {
+        if (hlist_hit(hlist, &r, 0.001f /*Fixing Shadow Acne*/, g_infinity, &rec)) {
             ray scattered;
             color attenuation;
-            if (material_scatter(rec.mat_ptr, r, &rec, &attenuation, &scattered))
-                ret = vec3_mul_elementwise(ray_color(&scattered, hlist, depth - 1), attenuation);
+            if (material_scatter(rec.mat_ptr, &r, &rec, &attenuation, &scattered))
+                ret = vec3_mul_elementwise(ray_color(scattered, hlist, depth - 1), attenuation);
         } else {    // bg: blend white and blue based on ray.y
-            vec3f unit_dir = vec3_normalize(r->dir);
+            vec3f unit_dir = vec3_normalize(r.dir);
             float wt = 0.5f * (unit_dir.y + 1.0f);
             color white = {1.0f, 1.0f, 1.0f};
             color blue = {.5f, .7f, 1.0f};
@@ -62,27 +62,30 @@ write_color (int out_color[3], color pixel_color, int samples_per_pixel) {
     for (int i = 0; i < 3; ++i)
         out_color[i] = (int)(256 * clamp(pixel_color.E[i], 0.0f, 0.999f));
 }
+
+#define samples_per_pixel 500
+hittable_list * g_world;
+
 int main () {
     //
     // -- image setup
-    float aspect_ratio = 3.f / 2.f;
-    int width = 400;
+    float aspect_ratio = 16.f / 9.f;
+    int width = 100;
     int height = (int)(width / aspect_ratio);
-    int samples_per_pixel = 500;
     int max_depth = 50;
     int * image_colors = calloc(height * width, 3 * sizeof(int));;
 
     //
-    // -- world setup
+    // -- g_world setup
     int const world_cap = 1000;
     byte * world_memory = malloc(hlist_size(world_cap));
-    hittable_list * world = hlist_init(world_memory, world_cap);
+    g_world = hlist_init(world_memory, world_cap);
 
     sphere s0 = {0};
     lambertian mat_ground;
     lambertian_init(&mat_ground, (color) { 0.5f, 0.5f, 0.5f });
     sphere_init(&s0, (point3) { 0.0f, -1000.0f, 0.0f }, 1000.0f, (material *)(&mat_ground));
-    hlist_add(world, (hittable *)&s0);
+    hlist_add(g_world, (hittable *)&s0);
 
     for (int a = -11; a < 11; ++a) {
         for (int b = -11; b < 11; ++b) {
@@ -96,7 +99,7 @@ int main () {
                     lambertian_init(mat_sphere_ptr, albedo);
                     sphere * s_ptr = malloc(sizeof(sphere));
                     sphere_init(s_ptr, center, 0.2f, (material *)(mat_sphere_ptr));
-                    hlist_add(world, (hittable *)s_ptr);
+                    hlist_add(g_world, (hittable *)s_ptr);
                 } else if (choose_mat < 0.95) {
                     // metal
                     color albedo = random_vec3_shifted(0.5f, 1.0f);
@@ -105,14 +108,14 @@ int main () {
                     metal_init(mat_sphere_ptr, albedo, fuzz);
                     sphere * s_ptr = malloc(sizeof(sphere));
                     sphere_init(s_ptr, center, 0.2f, (material *)(mat_sphere_ptr));
-                    hlist_add(world, (hittable *)s_ptr);
+                    hlist_add(g_world, (hittable *)s_ptr);
                 } else {
                     // dielectric
                     dielectric * mat_sphere_ptr = malloc(sizeof(dielectric));
                     dielectric_init(mat_sphere_ptr, 1.5f);
                     sphere * s_ptr = malloc(sizeof(sphere));
                     sphere_init(s_ptr, center, 0.2f, (material *)(mat_sphere_ptr));
-                    hlist_add(world, (hittable *)s_ptr);
+                    hlist_add(g_world, (hittable *)s_ptr);
                 }
             }
         }
@@ -122,19 +125,19 @@ int main () {
     dielectric mat1;
     dielectric_init(&mat1, 1.5f);
     sphere_init(&s1, (point3) { 0.f, 1.0f, 0.0f }, 1.0f, (material *)(&mat1));
-    hlist_add(world, (hittable *)&s1);
+    hlist_add(g_world, (hittable *)&s1);
 
     sphere s2 = {0};
     lambertian mat2;
     lambertian_init(&mat2, (color) { .4f, .2f, 0.1f });
     sphere_init(&s2, (point3) { -4.f, 1.0f, 0.0f }, 1.0f, (material *)(&mat2));
-    hlist_add(world, (hittable *)&s2);
+    hlist_add(g_world, (hittable *)&s2);
 
     sphere s3 = {0};
     metal mat3;
     metal_init(&mat3, (color) { .7f, .6f, 0.5f }, 0.0f);
     sphere_init(&s3, (point3) { 4.f, 1.0f, 0.0f }, 1.0f, (material *)(&mat3));
-    hlist_add(world, (hittable *)&s3);
+    hlist_add(g_world, (hittable *)&s3);
 
     //
     // -- camera setup
@@ -158,24 +161,19 @@ int main () {
     int j;
     int k = 0;
     for (j = height - 1; j >= 0; --j) {
-        fprintf(stderr, "\nScanlines remaining: %d", j);
+        fprintf(stderr, "\nScanlines remaining: %d\n", j);
         //fflush(stdout); // Will now print everything in the stdout buffer
         for (int i = 0; i < width; ++i) {
+            fprintf(stderr, "\r\t\t%d", i);
             color pixel_color = {0,0,0};
             int s;
-
-//#pragma omp parallel    
-//            {
-//#pragma omp for
 
                 for (s = 0; s < samples_per_pixel; ++s) {
                     float u = (float)(i + random_float()) / (width - 1);
                     float v = (float)(j + +random_float()) / (height - 1);
                     ray r = camera_cast_ray(&cam, u, v);
-                    pixel_color = vec3_add(pixel_color, ray_color(&r, world, max_depth));
+                    pixel_color = vec3_add(pixel_color, ray_color(r, g_world, max_depth));
                 }
-
-            //}   // end omp parallel
 
             write_color(&image_colors[k], pixel_color, samples_per_pixel);
             k += 3;
