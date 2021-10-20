@@ -1,0 +1,63 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="header files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="header files\util">
+      <UniqueIdentifier>{60fd5bdb-11e6-497f-8499-7440048fe101}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="source files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="source files\util">
+      <UniqueIdentifier>{a3e7e6ca-f80b-4ff3-9ad6-14ac1bfb366c}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\utils\d3dx12.h">
+      <Filter>header files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="..\utils\device_resources.h">
+      <Filter>header files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="..\utils\dx_sample.h">
+      <Filter>header files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="..\utils\dx_sampler_helper.h">
+      <Filter>header files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="..\utils\step_timer.h">
+      <Filter>header files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="..\utils\win32_app.h">
+      <Filter>header files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="headers\stdafx.h">
+      <Filter>header files</Filter>
+    </ClInclude>
+    <ClInclude Include="headers\dxr_helper.h">
+      <Filter>header files</Filter>
+    </ClInclude>
+    <ClInclude Include="headers\dxr_hello_triangle.h">
+      <Filter>header files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="headers\stdafx.cpp">
+      <Filter>header files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\utils\device_resources.cpp">
+      <Filter>source files\util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\_main_dxr_hello_triangle.cpp">
+      <Filter>source files</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>
