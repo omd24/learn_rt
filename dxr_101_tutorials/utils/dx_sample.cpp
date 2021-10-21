@@ -1,5 +1,4 @@
 #include "stdafx.h"
-#include "../dxr_hello_triangle/headers/stdafx.h"
 
 #include "dx_sample.h"
 

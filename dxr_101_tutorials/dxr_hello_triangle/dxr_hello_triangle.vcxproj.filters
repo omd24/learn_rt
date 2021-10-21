@@ -56,7 +56,7 @@
     <ClCompile Include="..\utils\device_resources.cpp">
       <Filter>source files\util</Filter>
     </ClCompile>
-    <ClCompile Include="src\_main_dxr_hello_triangle.cpp">
+    <ClCompile Include="src\_main_dxr_hello_triangle_app.cpp">
       <Filter>source files</Filter>
     </ClCompile>
     <ClCompile Include="..\utils\win32_app.cpp">
@@ -64,6 +64,9 @@
     </ClCompile>
     <ClCompile Include="..\utils\dx_sample.cpp">
       <Filter>source files\util</Filter>
+    </ClCompile>
+    <ClCompile Include="src\dxr_hello_triangle.cpp">
+      <Filter>source files</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

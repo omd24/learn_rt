@@ -22,12 +22,12 @@
 
 #include <dxgi1_6.h>
 #include <d3d12.h>
-#include "../../utils/d3dx12.h"
+#include "d3dx12.h"
 
 #ifdef _DEBUG
 #include <dxgidebug.h>
 #endif
 
-#include "../../utils/dx_sampler_helper.h"
-#include "../../utils/device_resources.h"
+#include "dx_sampler_helper.h"
+#include "device_resources.h"
 

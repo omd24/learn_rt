@@ -1,5 +1,4 @@
 #include "stdafx.h"
-#include "../dxr_hello_triangle/headers/stdafx.h"   // just to prevent VS false errors
 
 #include "device_resources.h"
 #include "win32_app.h"

@@ -1,5 +1,4 @@
 #include "stdafx.h"
-#include "../dxr_hello_triangle/headers/stdafx.h"
 
 #include "win32_app.h"
 #include "dx_sampler_helper.h"
