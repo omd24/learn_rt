@@ -48,7 +48,7 @@ LRESULT CALLBACK Win32App::WindowProc (HWND hwnd, UINT msg, WPARAM wparam, LPARA
             sample->SetWindowBounds(wnd_rect.left, wnd_rect.top, wnd_rect.right, wnd_rect.bottom);
             RECT client_rect = {};
             GetClientRect(hwnd, &client_rect);
-            sample->OnSizeChanged(client_rect.right, client_rect.left,
+            sample->OnSizeChanged(client_rect.right - client_rect.left,
                 client_rect.bottom - client_rect.top, wparam == SIZE_MINIMIZED);
         }
         return 0;
@@ -78,11 +78,11 @@ LRESULT CALLBACK Win32App::WindowProc (HWND hwnd, UINT msg, WPARAM wparam, LPARA
         UINT y = HIWORD(lparam);
         sample->OnLeftButtonDown(x, y);
     } return 0;
-    case WM_LBUTTONUP:
+    case WM_LBUTTONUP: {
         UINT x = LOWORD(lparam);
         UINT y = HIWORD(lparam);
         sample->OnLeftButtonUp(x, y);
-        return 0;
+    } return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
@@ -117,7 +117,7 @@ int Win32App::Run (DXSample * sample, HINSTANCE inst, int cmdshow) {
             window_style_,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
-            R.right- R.left,
+            R.right - R.left,
             R.bottom - R.top,
             nullptr, nullptr, // no parent, no menus
             inst,

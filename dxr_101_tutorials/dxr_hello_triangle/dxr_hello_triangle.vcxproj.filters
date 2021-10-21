@@ -62,5 +62,8 @@
     <ClCompile Include="..\utils\win32_app.cpp">
       <Filter>source files\util</Filter>
     </ClCompile>
+    <ClCompile Include="..\utils\dx_sample.cpp">
+      <Filter>source files\util</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

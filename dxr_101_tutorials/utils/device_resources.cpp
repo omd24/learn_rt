@@ -230,14 +230,14 @@ void DeviceResources::CreateWindowSizeDependentResources () {
         // -- so temporary remove top-most property, create swapchain, then reset back top-most property
         bool prev_isfullscreen = Win32App::IsFullscreen();
         if (prev_isfullscreen)
-            Win32App::SetWindowZorderToTopMost(false);
+            Win32App::SetWindowZOrderToTopMost(false);
         ThrowIfFailed(dxgi_factory_->CreateSwapChainForHwnd(
             cmdqueue_.Get(), window_,
             &swapchain_desc, &fs_desc, nullptr,
             &swapchain
         ));
         if (prev_isfullscreen)
-            Win32App::SetWindowZorderToTopMost(true);
+            Win32App::SetWindowZOrderToTopMost(true);
         ThrowIfFailed(swapchain.As(&swapchain_));
 
         // NOTE(omid): With tearing support enabled, we will handle Alt+Enter ourselves (rather than dxgi) 

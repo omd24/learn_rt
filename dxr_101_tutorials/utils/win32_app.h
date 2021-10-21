@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dx_sample.h"
+
 class DXSample;
 
 class Win32App {
