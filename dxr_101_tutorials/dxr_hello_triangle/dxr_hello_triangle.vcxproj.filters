@@ -59,5 +59,8 @@
     <ClCompile Include="src\_main_dxr_hello_triangle.cpp">
       <Filter>source files</Filter>
     </ClCompile>
+    <ClCompile Include="..\utils\win32_app.cpp">
+      <Filter>source files\util</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
