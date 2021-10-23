@@ -144,7 +144,7 @@ class GpuUploadBuffer {
 protected:
     ComPtr<ID3D12Resource> resource_;
 
-    GpuUploadBuffer ();
+    GpuUploadBuffer () {}
     ~GpuUploadBuffer () {
         if (resource_.Get())
             resource_->Unmap(0, nullptr);
