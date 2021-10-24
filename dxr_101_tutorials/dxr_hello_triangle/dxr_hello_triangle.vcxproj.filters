@@ -48,6 +48,9 @@
     <ClInclude Include="headers\dxr_hello_triangle.h">
       <Filter>header files</Filter>
     </ClInclude>
+    <ClInclude Include="headers\rt_hlsl_compat.h">
+      <Filter>header files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="headers\stdafx.cpp">

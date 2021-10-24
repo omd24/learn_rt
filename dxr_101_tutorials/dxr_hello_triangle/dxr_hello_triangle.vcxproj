@@ -27,6 +27,7 @@
     <ClInclude Include="..\utils\win32_app.h" />
     <ClInclude Include="headers\dxr_hello_triangle.h" />
     <ClInclude Include="headers\dxr_helper.h" />
+    <ClInclude Include="headers\rt_hlsl_compat.h" />
     <ClInclude Include="headers\stdafx.h" />
   </ItemGroup>
   <ItemGroup>
