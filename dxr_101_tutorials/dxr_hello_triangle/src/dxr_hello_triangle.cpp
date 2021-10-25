@@ -433,7 +433,59 @@ void DXRHelloTriangle::build_acceleration_structures () {
     // -- N.B., wait for gpu to finish as the locally created temporary gpu resources will get released once out of scope
     device_resources_->WaitForGpu();
 }
-void DXRHelloTriangle::build_shader_tables ();
+// -- shader table encapsulates all shader records which means shaders and arguments for their local root sig
+void DXRHelloTriangle::build_shader_tables () {
+    auto dev = device_resources_->GetDevice();
+
+    void * raygen_shader_id;
+    void * miss_shader_id;
+    void * hitgroup_shader_id;
+
+    auto GetShaderIds = [&] (auto * state_obj_properties) {
+        raygen_shader_id = state_obj_properties->GetShaderIdentifier(raygen_shader_name_);
+        miss_shader_id = state_obj_properties->GetShaderIdentifier(miss_shader_name_);
+        hitgroup_shader_id = state_obj_properties->GetShaderIdentifier(hitgroup_name_);
+    };
+    // -- get shader ids:
+    UINT shader_id_size;
+    {
+        ComPtr<ID3D12StateObjectProperties> state_obj_properties;
+        ThrowIfFailed(dxr_state_object_.As(&state_obj_properties));
+        GetShaderIds(state_obj_properties.Get());
+        shader_id_size = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    }
+    // -- raygen shader table
+    {
+        struct RootArguments {
+            RayGenCBuffer cb;
+        } root_args;
+        root_args.cb = raygen_cb_;
+
+        UINT num_shader_records = 1;
+        UINT shader_record_size = shader_id_size + sizeof(root_args);
+        ShaderTable raygen_shadertable(dev, num_shader_records, shader_record_size, L"RayGenShaderTable");
+        raygen_shadertable.PushBack(ShaderRecord(raygen_shader_id, shader_id_size, &root_args, sizeof(root_args)));
+        raygen_shadertable_ = raygen_shadertable.GetResource();
+    }
+    // -- miss shader table
+    {
+        UINT num_shader_records = 1;
+        UINT shader_record_size = shader_id_size;
+        ShaderTable miss_shadertable(dev, num_shader_records, shader_record_size, L"MissShaderTable");
+        miss_shadertable.PushBack(ShaderRecord(miss_shader_id, shader_id_size));
+        miss_shadertable_ = miss_shadertable.GetResource();
+    }
+    // -- hit group shader table
+    {
+        UINT num_shader_records = 1;
+        UINT shader_record_size = shader_id_size;
+        ShaderTable hitgroup_shadertable(dev, num_shader_records, shader_record_size, L"HitGroupShaderTable");
+        hitgroup_shadertable.PushBack(ShaderRecord(hitgroup_shader_id, shader_id_size));
+        hitgroup_shadertable_ = hitgroup_shadertable.GetResource();
+    }
+
+
+}
 void DXRHelloTriangle::update_for_size_changes (UINT w, UINT h);
 void DXRHelloTriangle::copy_raytracing_output_to_backbuffer ();
 void DXRHelloTriangle::calc_frame_stats ();
