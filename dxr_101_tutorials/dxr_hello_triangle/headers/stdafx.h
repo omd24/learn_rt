@@ -28,6 +28,6 @@
 #include <dxgidebug.h>
 #endif
 
-#include "dx_sampler_helper.h"
+#include "dx_sample_helper.h"
 #include "device_resources.h"
 

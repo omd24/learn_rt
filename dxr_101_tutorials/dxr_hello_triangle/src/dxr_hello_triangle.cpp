@@ -129,7 +129,10 @@ void DXRHelloTriangle::OnInit () {
     create_window_size_dependent_resources();
 }
 
-void DXRHelloTriangle::OnUpdate ();
+void DXRHelloTriangle::OnUpdate () {
+    timer_.Tick();
+    calc_frame_stats();
+}
 void DXRHelloTriangle::OnRender ();
 void DXRHelloTriangle::OnSizeChanged (UINT w, UINT h, bool minimized);
 void DXRHelloTriangle::OnDestroy ();
@@ -137,9 +140,31 @@ void DXRHelloTriangle::OnDestroy ();
 void DXRHelloTriangle::recreate_d3d ();
 void DXRHelloTriangle::do_raytracing ();
 
-void DXRHelloTriangle::create_window_size_dependent_resources ();
-void DXRHelloTriangle::release_device_dependent_resources ();
-void DXRHelloTriangle::release_window_size_dependent_resources ();
+void DXRHelloTriangle::create_window_size_dependent_resources () {
+    create_raytracing_output_resource();
+    // -- for simplicity we just rebuild the shader tables
+    build_shader_tables();
+}
+void DXRHelloTriangle::release_device_dependent_resources () {
+    raytracing_global_root_sig_.Reset();
+    raytracing_local_root_sig_.Reset();
+
+    dxr_device_.Reset();
+    dxr_cmdlist_.Reset();
+    dxr_state_object_.Reset();
+
+    descriptor_heap_.Reset();
+    num_descriptors_allocated_ = 0;
+    raytracing_output_uav_descriptor_heap_index_ = UINT_MAX;
+    index_buffer_.Reset();
+    vertex_buffer_.Reset();
+}
+void DXRHelloTriangle::release_window_size_dependent_resources () {
+    raygen_shadertable_.Reset();
+    miss_shadertable_.Reset();
+    hitgroup_shadertable_.Reset();
+    raytracing_output_.Reset();
+}
 
 // -- create raytracing device and cmdlist
 void DXRHelloTriangle::create_raytracing_interfaces () {
@@ -175,7 +200,7 @@ void DXRHelloTriangle::create_raytracing_pipeline_state_object () {
     // -- this contains the shaders and their entry points for the state object
     // -- since shaders are not considered a subobj, they need to be passed in via DXIL subobjs
     auto lib = rtpipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
-    D3D12_SHADER_BYTECODE libdxil = CD3D12_SHADER_BYTECODE((void *)g_pRaytracing, _countof(g_pRaytracing));
+    D3D12_SHADER_BYTECODE libdxil = CD3DX12_SHADER_BYTECODE((void *)g_pRaytracing, _countof(g_pRaytracing));
     lib->SetDXILLibrary(&libdxil);
     // -- define which shader exports to surface from the library
     // -- if no shader exports are defined for a dxil library subobject, all shaders will be surfaced.
@@ -230,12 +255,186 @@ void DXRHelloTriangle::create_raytracing_pipeline_state_object () {
     ThrowIfFailed(dxr_device_->CreateStateObject(rtpipeline, IID_PPV_ARGS(&dxr_state_object_)),
         L"ERROR: couldn't DXR state object\n");
 }
-void DXRHelloTriangle::create_descriptor_heap ();
-void DXRHelloTriangle::create_raytracing_output_resource ();
-void DXRHelloTriangle::build_geometry ();
-void DXRHelloTriangle::build_acceleration_structures ();
+void DXRHelloTriangle::create_descriptor_heap () {
+    auto dev = device_resources_->GetDevice();
+    D3D12_DESCRIPTOR_HEAP_DESC descriptor_heap_desc = {};
+    // -- allocate a heap for a single descriptor: 1 UAV to raytracing output texture
+    descriptor_heap_desc.NumDescriptors = 1;
+    descriptor_heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    descriptor_heap_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    descriptor_heap_desc.NodeMask = 0;
+    dev->CreateDescriptorHeap(&descriptor_heap_desc, IID_PPV_ARGS(&descriptor_heap_));
+    NAME_D3D12_OBJECT(descriptor_heap_);
+
+    descriptor_size_ = dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+}
+// -- allocate a descriptor and return its index:
+// -- if the passed descriptor_index is valid it will be used instead of allocating a new one
+UINT DXRHelloTriangle::allocate_descriptor (D3D12_CPU_DESCRIPTOR_HANDLE * hcpu_descriptor, UINT descriptor_index_to_use) {
+    auto hcpu_descriptor_start = descriptor_heap_->GetCPUDescriptorHandleForHeapStart();
+    if (descriptor_index_to_use >= descriptor_heap_->GetDesc().NumDescriptors) {
+        descriptor_index_to_use = num_descriptors_allocated_;
+        ++num_descriptors_allocated_;
+    }
+    *hcpu_descriptor = CD3DX12_CPU_DESCRIPTOR_HANDLE(hcpu_descriptor_start, descriptor_index_to_use, descriptor_size_);
+    return descriptor_index_to_use;
+}
+// -- create 2D output texture for raytracing
+void DXRHelloTriangle::create_raytracing_output_resource () {
+    auto dev = device_resources_->GetDevice();
+    auto backbuffer_format = device_resources_->GetBackbufferFormat();
+
+    // -- create output resource. dimesions and format should match the swapchain
+    auto resource_desc = CD3DX12_RESOURCE_DESC::Tex2D(
+        backbuffer_format, width_, height_, 1 /*array size*/, 1 /* miplevels*/,
+        1 /*sample count*/, 0 /*sample quality*/,
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+    );
+    ThrowIfFailed(dev->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+        D3D12_HEAP_FLAG_NONE,
+        &resource_desc,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        nullptr,
+        IID_PPV_ARGS(&raytracing_output_)
+    ));
+    NAME_D3D12_OBJECT(raytracing_output_);
+
+    // -- create UAV
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+    uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    D3D12_CPU_DESCRIPTOR_HANDLE hcpu_uav;
+    raytracing_output_uav_descriptor_heap_index_ = allocate_descriptor(&hcpu_uav, raytracing_output_uav_descriptor_heap_index_);
+    dev->CreateUnorderedAccessView(raytracing_output_.Get(), nullptr, &uav_desc, hcpu_uav);
+    hgpu_raytracing_output_uav_ = CD3DX12_GPU_DESCRIPTOR_HANDLE(
+        descriptor_heap_->GetGPUDescriptorHandleForHeapStart(),
+        raytracing_output_uav_descriptor_heap_index_, descriptor_size_
+    );
+}
+
+void DXRHelloTriangle::build_geometry () {
+    auto dev = device_resources_->GetDevice();
+    Index indices [] = {0, 1, 2};
+    float depth_value = 1.0f;
+    float offset = 0.7f;
+    Vertex vertices [] = {
+        // -- the sample raytraces in screen space coordinates
+        // -- since DirectX screen space coordiantes are right handed (i.e., Y axis points down aka y increases going down)
+        // -- so define vertices in counter clockwise order (it would be clockwise if left handed)
+        {0, -offset, depth_value},
+        {-offset, offset, depth_value},
+        {offset, offset, depth_value},
+    };
+    AllocateUploadBuffer(dev, vertices, sizeof(vertices), &vertex_buffer_);
+    AllocateUploadBuffer(dev, indices, sizeof(indices), &index_buffer_);
+}
+void DXRHelloTriangle::build_acceleration_structures () {
+    auto dev = device_resources_->GetDevice();
+    auto cmdlist=  device_resources_->GetCmdlist();
+    auto cmdqueue = device_resources_->GetCmdqueue();
+    auto cmdalloc = device_resources_->GetCmdalloc();
+
+    // -- reset cmdlist for AS construction
+    cmdlist->Reset(cmdalloc, nullptr);
+
+    D3D12_RAYTRACING_GEOMETRY_DESC geometry_desc = {};
+    geometry_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+    geometry_desc.Triangles.IndexBuffer = index_buffer_->GetGPUVirtualAddress();
+    geometry_desc.Triangles.IndexCount = static_cast<UINT>(index_buffer_->GetDesc().Width) / sizeof(Index);
+    geometry_desc.Triangles.IndexFormat = DXGI_FORMAT_R16_UINT;
+    geometry_desc.Triangles.Transform3x4 = 0;
+    geometry_desc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+    geometry_desc.Triangles.VertexCount = static_cast<UINT>(vertex_buffer_->GetDesc().Width) / sizeof(Vertex);
+    geometry_desc.Triangles.VertexBuffer.StartAddress = vertex_buffer_->GetGPUVirtualAddress();
+    geometry_desc.Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
+
+    // -- mark the geomtery as opaque
+    // -- performance tip: mark geometries as opaque whenever applicable as it can be enable imprtant ray processing optimization
+    // -- when rays encounter opaque geometries, any anyhit shader won't be executed whether it is present or not
+    geometry_desc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+
+    // -- get required sizes for an AS
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS build_flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS toplevel_inputs = {};
+    toplevel_inputs.DescsLayout - D3D12_ELEMENTS_LAYOUT_ARRAY;
+    toplevel_inputs.Flags = build_flags;
+    toplevel_inputs.NumDescs = 1;   // one BLAS instance
+    toplevel_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO toplevel_prebuild_info = {};
+    dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&toplevel_inputs, &toplevel_prebuild_info);
+    ThrowIfFailed(toplevel_prebuild_info.ResultDataMaxSizeInBytes > 0);
+
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO bottomlevel_prebuild_info = {};
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS bottomlevel_inputs = toplevel_inputs;
+    bottomlevel_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+    bottomlevel_inputs.pGeometryDescs = &geometry_desc;
+    dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&bottomlevel_inputs, &bottomlevel_prebuild_info);
+    ThrowIfFailed(bottomlevel_prebuild_info.ResultDataMaxSizeInBytes > 0);
+
+    ComPtr<ID3D12Resource> scratch_resource;
+    AllocateUAVBuffer(
+        dev, max(toplevel_prebuild_info.ScratchDataSizeInBytes, bottomlevel_prebuild_info.ScratchDataSizeInBytes),
+        &scratch_resource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        L"ScratchResource"
+    );
+
+    // -- allocate resources for acceleration structures:
+    // -- acceleration structures can only be placed in resources that are created in the default heap (or custom heap equivalent)
+    // -- default heap means "device local" aka application doesn't need cpu read/write to it,
+    // -- so default heaps are OK
+    // -- resources that will contain AS must be created in the state D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
+    // -- and must have resource flag D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS. N.B., the ALLOW_UNORDERED_ACCESS simply acknowledges both:
+    // -- two reasons the UAV access is important:
+    // -- (1) sys will be doing this type of access in its implementation of AS builds behind the scene
+    // -- (2) from the app pov, synchronization of writes/reads to AS is accomplished through UAV barriers
+    {
+        D3D12_RESOURCE_STATES init_state = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+        AllocateUAVBuffer(dev, bottomlevel_prebuild_info.ResultDataMaxSizeInBytes, &blas_, init_state, L"BLAS");
+        AllocateUAVBuffer(dev, toplevel_prebuild_info.ResultDataMaxSizeInBytes, &tlas_, init_state, L"TLAS");
+    }
+
+    // -- create an instance desc for the BLAS
+    ComPtr<ID3D12Resource> instance_descs;
+    D3D12_RAYTRACING_INSTANCE_DESC instance_desc = {};
+    instance_desc.Transform[0][0] = instance_desc.Transform[1][1] = instance_desc.Transform[2][2] = 1;
+    instance_desc.InstanceMask = 1;
+    instance_desc.AccelerationStructure = blas_->GetGPUVirtualAddress();
+    AllocateUploadBuffer(dev, &instance_desc, sizeof(instance_desc), &instance_descs, L"InstanceDescs");
+
+    // -- BLAS build desc
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC blas_build_desc = {};
+    {
+        blas_build_desc.Inputs = bottomlevel_inputs;
+        blas_build_desc.ScratchAccelerationStructureData = scratch_resource->GetGPUVirtualAddress();
+        blas_build_desc.DestAccelerationStructureData = blas_->GetGPUVirtualAddress();
+    }
+    // -- TLAS build desc
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC tlas_build_desc = {};
+    {
+        toplevel_inputs.InstanceDescs = instance_descs->GetGPUVirtualAddress();
+        tlas_build_desc.Inputs = toplevel_inputs;
+        tlas_build_desc.ScratchAccelerationStructureData = scratch_resource->GetGPUVirtualAddress();
+        tlas_build_desc.DestAccelerationStructureData = tlas_->GetGPUVirtualAddress();
+    }
+
+    auto BuildAccelerationStructure = [&](auto * raytracing_cmdlist) {
+        raytracing_cmdlist->BuildRaytracingAccelerationStructure(&blas_build_desc, 0, nullptr);
+        cmdlist->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::UAV(blas_.Get()));
+        raytracing_cmdlist->BuildRaytracingAccelerationStructure(&tlas_build_desc, 0, nullptr);
+    };
+
+    // -- build AS:
+    BuildAccelerationStructure(dxr_cmdlist_.Get());
+
+    // -- kick off AS construction:
+    device_resources_->ExecuteCmdlist();
+
+    // -- N.B., wait for gpu to finish as the locally created temporary gpu resources will get released once out of scope
+    device_resources_->WaitForGpu();
+}
 void DXRHelloTriangle::build_shader_tables ();
 void DXRHelloTriangle::update_for_size_changes (UINT w, UINT h);
 void DXRHelloTriangle::copy_raytracing_output_to_backbuffer ();
 void DXRHelloTriangle::calc_frame_stats ();
-UINT DXRHelloTriangle::allocate_descriptor (D3D12_CPU_DESCRIPTOR_HANDLE * hcpu_descriptor, UINT desciptor_index_to_use = UINT_MAX);
+

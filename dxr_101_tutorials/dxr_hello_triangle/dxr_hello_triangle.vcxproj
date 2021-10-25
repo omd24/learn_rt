@@ -22,7 +22,7 @@
     <ClInclude Include="..\utils\d3dx12.h" />
     <ClInclude Include="..\utils\device_resources.h" />
     <ClInclude Include="..\utils\dx_sample.h" />
-    <ClInclude Include="..\utils\dx_sampler_helper.h" />
+    <ClInclude Include="..\utils\dx_sample_helper.h" />
     <ClInclude Include="..\utils\step_timer.h" />
     <ClInclude Include="..\utils\win32_app.h" />
     <ClInclude Include="headers\dxr_hello_triangle.h" />
