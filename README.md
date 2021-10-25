@@ -1,6 +1,7 @@
 # learn_rt
-Beginner-level Ray Tracing repo.
-So far reworked Raytracing in One Weekend by Peter Shirley with my shabby C code:)  
+Beginner-level Ray Tracing repo.   
+
+Step 1 - The rt_one_weekend is my implementation of Raytracing in One Weekend by Peter Shirley with my shabby C code:)  
 I did it in C just for the heck of it. It made the implementation unnecessarily harder but more fun.   
 For a better, cleaner and more efficient C take of the book refer to Eugene Morozov implementation   
 https://github.com/Morozov-5F/raytracing-weekend  
@@ -14,4 +15,4 @@ Here is the result of another experimental run:
    
 ![_image_final_1](https://user-images.githubusercontent.com/74592722/125200548-e7591b80-e280-11eb-8f6f-ab95818b6a71.jpg)
 
-
+Step 2 - Working on a beginner-level DXR sample... [WIP]
