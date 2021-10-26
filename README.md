@@ -15,4 +15,6 @@ Here is the result of another experimental run:
    
 ![_image_final_1](https://user-images.githubusercontent.com/74592722/125200548-e7591b80-e280-11eb-8f6f-ab95818b6a71.jpg)
 
-Step 2 - Working on a beginner-level DXR sample... [WIP]
+Step 2 - Working on a beginner-level DXR samples... [WIP]
+2.1.
+![dxr hello tri](https://github.com/omd24/learn_rt/blob/2f131bd0ed9dbc4f67ffe72530964308e8540bd5/dxr_101_tutorials/dxr_hello_triangle/dxr_hello_triangle.jpg)
