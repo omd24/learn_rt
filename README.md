@@ -17,4 +17,4 @@ Here is the result of another experimental run:
 
 Step 2 - Working on a beginner-level DXR samples... [WIP]
 2.1.
-![dxr hello tri](https://github.com/omd24/learn_rt/blob/2f131bd0ed9dbc4f67ffe72530964308e8540bd5/dxr_101_tutorials/dxr_hello_triangle/dxr_hello_triangle.jpg)
+![dxr hello tri](https://github.com/omd24/learn_rt/blob/65f8732b7b51c2552a3450d463703d6be3332607/dxr_101_tutorials/dxr_hello_triangle/dxr_hello_tri.jpg)
