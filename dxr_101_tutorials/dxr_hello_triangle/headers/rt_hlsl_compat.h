@@ -2,10 +2,10 @@
 #define RT_HLSL_COMPAT_H
 
 struct Viewport {
-    float Left;
-    float Top;
-    float Right;
-    float Bottom;
+    float left;
+    float top;
+    float right;
+    float bottom;
 };
 struct RayGenCBuffer {
     Viewport viewport;

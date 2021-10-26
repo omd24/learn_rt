@@ -8,8 +8,9 @@
 using namespace std;
 using namespace DX;
 
+// NOTE(omid): names from shader code... 
 wchar_t const * DXRHelloTriangle::hitgroup_name_ = L"MyHitGroup";
-wchar_t const * DXRHelloTriangle::raygen_shader_name_ = L"MyRayGenShader";
+wchar_t const * DXRHelloTriangle::raygen_shader_name_ = L"MyRaygenShader";
 wchar_t const * DXRHelloTriangle::closesthit_shader_name_ = L"MyClosestHitShader";
 wchar_t const * DXRHelloTriangle::miss_shader_name_ = L"MyMissShader";
 
@@ -139,7 +140,7 @@ void DXRHelloTriangle::OnRender () {
     device_resources_->Prepare();
     do_raytracing();
     copy_raytracing_output_to_backbuffer();
-    device_resources_->Prepare(D3D12_RESOURCE_STATE_PRESENT);
+    device_resources_->Present(D3D12_RESOURCE_STATE_PRESENT);
 }
 void DXRHelloTriangle::OnSizeChanged (UINT w, UINT h, bool minimized) {
     if (!device_resources_->WindowSizeChanged(w, h, minimized))
