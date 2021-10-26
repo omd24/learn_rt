@@ -1,7 +1,7 @@
 #include "stdafx.h"
 
 #include "win32_app.h"
-#include "dx_sampler_helper.h"
+#include "dx_sample_helper.h"
 
 using Microsoft::WRL::ComPtr;
 

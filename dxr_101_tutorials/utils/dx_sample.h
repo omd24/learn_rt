@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dx_sampler_helper.h"
+#include "dx_sample_helper.h"
 #include "win32_app.h"
 #include "device_resources.h"
 

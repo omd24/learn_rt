@@ -133,12 +133,66 @@ void DXRHelloTriangle::OnUpdate () {
     timer_.Tick();
     calc_frame_stats();
 }
-void DXRHelloTriangle::OnRender ();
-void DXRHelloTriangle::OnSizeChanged (UINT w, UINT h, bool minimized);
-void DXRHelloTriangle::OnDestroy ();
+void DXRHelloTriangle::OnRender () {
+    if (!device_resources_->IsWindowVisible())
+        return;
+    device_resources_->Prepare();
+    do_raytracing();
+    copy_raytracing_output_to_backbuffer();
+    device_resources_->Prepare(D3D12_RESOURCE_STATE_PRESENT);
+}
+void DXRHelloTriangle::OnSizeChanged (UINT w, UINT h, bool minimized) {
+    if (!device_resources_->WindowSizeChanged(w, h, minimized))
+        return;
+    update_for_size_changes(w, h);
+    release_window_size_dependent_resources();
+    create_window_size_dependent_resources();
+}
+void DXRHelloTriangle::OnDestroy () {
+    device_resources_->WaitForGpu();
+    OnDeviceLost();
+}
 
-void DXRHelloTriangle::recreate_d3d ();
-void DXRHelloTriangle::do_raytracing ();
+void DXRHelloTriangle::recreate_d3d () {
+    // -- give gpu a chance to finish its execution in prograss
+    try {
+        device_resources_->WaitForGpu();
+    } catch (HrException &) {
+        // -- do nothing, currently attached adapater is unresponsive
+    }
+    device_resources_->HandleDeviceLost();
+}
+void DXRHelloTriangle::do_raytracing () {
+    auto cmdlist = device_resources_->GetCmdlist();
+
+    using DispatchDesc = D3D12_DISPATCH_RAYS_DESC;
+    auto DispatchRays = [&](auto * cmdlist, auto * state_obj, DispatchDesc * dispatch_desc) {
+        // -- since each shader table has only one shader record, the stride is same as size
+        dispatch_desc->HitGroupTable.StartAddress = hitgroup_shadertable_->GetGPUVirtualAddress();
+        dispatch_desc->HitGroupTable.SizeInBytes = hitgroup_shadertable_->GetDesc().Width;
+        dispatch_desc->HitGroupTable.StrideInBytes = dispatch_desc->HitGroupTable.SizeInBytes;
+        dispatch_desc->MissShaderTable.StartAddress = miss_shadertable_->GetGPUVirtualAddress();
+        dispatch_desc->MissShaderTable.SizeInBytes = miss_shadertable_->GetDesc().Width;
+        dispatch_desc->MissShaderTable.StrideInBytes = dispatch_desc->MissShaderTable.SizeInBytes;
+        dispatch_desc->RayGenerationShaderRecord.StartAddress = raygen_shadertable_->GetGPUVirtualAddress();
+        dispatch_desc->RayGenerationShaderRecord.SizeInBytes = raygen_shadertable_->GetDesc().Width;
+        dispatch_desc->Width = width_;
+        dispatch_desc->Height = height_;
+        dispatch_desc->Depth = 1;
+        cmdlist->SetPipelineState1(state_obj);
+        cmdlist->DispatchRays(dispatch_desc);
+    };
+
+    cmdlist->SetComputeRootSignature(raytracing_global_root_sig_.Get());
+
+    // -- bind the heaps and acceleration structure, and then dispatch rays
+    DispatchDesc dispatch_desc = {};
+    cmdlist->SetDescriptorHeaps(1, descriptor_heap_.GetAddressOf());
+    cmdlist->SetComputeRootDescriptorTable(GlobalRootSignatureParams::OutputViewSlot, hgpu_raytracing_output_uav_);
+    cmdlist->SetComputeRootShaderResourceView(GlobalRootSignatureParams::AccelerationStructureSlot, tlas_->GetGPUVirtualAddress());
+
+    DispatchRays(dxr_cmdlist_.Get(), dxr_state_object_.Get(), &dispatch_desc);
+}
 
 void DXRHelloTriangle::create_window_size_dependent_resources () {
     create_raytracing_output_resource();
@@ -356,7 +410,7 @@ void DXRHelloTriangle::build_acceleration_structures () {
     // -- get required sizes for an AS
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAGS build_flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS toplevel_inputs = {};
-    toplevel_inputs.DescsLayout - D3D12_ELEMENTS_LAYOUT_ARRAY;
+    toplevel_inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
     toplevel_inputs.Flags = build_flags;
     toplevel_inputs.NumDescs = 1;   // one BLAS instance
     toplevel_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
@@ -441,7 +495,7 @@ void DXRHelloTriangle::build_shader_tables () {
     void * miss_shader_id;
     void * hitgroup_shader_id;
 
-    auto GetShaderIds = [&] (auto * state_obj_properties) {
+    auto GetShaderIds = [&](auto * state_obj_properties) {
         raygen_shader_id = state_obj_properties->GetShaderIdentifier(raygen_shader_name_);
         miss_shader_id = state_obj_properties->GetShaderIdentifier(miss_shader_name_);
         hitgroup_shader_id = state_obj_properties->GetShaderIdentifier(hitgroup_name_);
@@ -483,10 +537,61 @@ void DXRHelloTriangle::build_shader_tables () {
         hitgroup_shadertable.PushBack(ShaderRecord(hitgroup_shader_id, shader_id_size));
         hitgroup_shadertable_ = hitgroup_shadertable.GetResource();
     }
-
-
 }
-void DXRHelloTriangle::update_for_size_changes (UINT w, UINT h);
-void DXRHelloTriangle::copy_raytracing_output_to_backbuffer ();
-void DXRHelloTriangle::calc_frame_stats ();
+// -- update app state with new resolution
+void DXRHelloTriangle::update_for_size_changes (UINT w, UINT h) {
+    DXSample::UpdateForSizeChange(w, h);
+    float border = 0.1f;
+    if (width_ <= height_) {
+        raygen_cb_.stencil = {
+            -1.0f + border, -1.0f + border * aspect_ratio_,
+            1.0f - border, 1.0f - border * aspect_ratio_
+        };
+    } else {
+        raygen_cb_.stencil = {
+            -1.0f + border / aspect_ratio_, -1.0f + border,
+            1.0f - border / aspect_ratio_, 1.0f - border
+        };
+    }
+}
+void DXRHelloTriangle::copy_raytracing_output_to_backbuffer () {
+    auto cmdlist = device_resources_->GetCmdlist();
+    auto render_target = device_resources_->GetRenderTarget();
+
+    // -- Yay! using more than one barrier finally :)
+    D3D12_RESOURCE_BARRIER precopy_barriers[2];
+    precopy_barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(render_target, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST);
+    precopy_barriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(raytracing_output_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    cmdlist->ResourceBarrier(_countof(precopy_barriers), precopy_barriers);
+
+    cmdlist->CopyResource(render_target, raytracing_output_.Get());
+
+    D3D12_RESOURCE_BARRIER postcopy_barriers[2];
+    postcopy_barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(render_target, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+    postcopy_barriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(raytracing_output_.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    cmdlist->ResourceBarrier(_countof(postcopy_barriers), postcopy_barriers);
+}
+// -- compute average fps and million rays per second
+void DXRHelloTriangle::calc_frame_stats () {
+    static int frame_cnt = 0;
+    static double elapsed_time = 0.0f;
+    double total_time = timer_.GetTotalSeconds();
+    ++frame_cnt;
+    // -- compute averages over one second period
+    if ((total_time - elapsed_time) >= 1.0f) {
+        float diff = static_cast<float>(total_time - elapsed_time);
+        float fps = static_cast<float>(frame_cnt) / diff; // normalize to an exact second
+
+        frame_cnt = 0;
+        elapsed_time = total_time;
+
+        float million_rays_per_sec = (width_ * height_ * fps) / static_cast<float>(1e6);
+
+        wstringstream window_text;
+        window_text << setprecision(2) << fixed
+            << L"   fps: " << fps << L"   ~Million Primary Rays per Second: " << million_rays_per_sec
+            << L"   gpu[" << device_resources_->GetAdapterId() << L"] " << device_resources_->GetAdapaterDescription();
+        SetCustomWindowText(window_text.str().c_str());
+    }
+}
 
