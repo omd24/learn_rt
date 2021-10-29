@@ -3,7 +3,7 @@
 #include "dxr_hello_triangle.h"
 #include "dxr_helper.h"
 // compiled shader...
-#include "Raytracing.hlsl.h"
+#include "../compiled_shaders/raytracing.hlsl.h"
 
 using namespace std;
 using namespace DX;
@@ -255,7 +255,7 @@ void DXRHelloTriangle::create_raytracing_pipeline_state_object () {
     // -- this contains the shaders and their entry points for the state object
     // -- since shaders are not considered a subobj, they need to be passed in via DXIL subobjs
     auto lib = rtpipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
-    D3D12_SHADER_BYTECODE libdxil = CD3DX12_SHADER_BYTECODE((void *)g_pRaytracing, _countof(g_pRaytracing));
+    D3D12_SHADER_BYTECODE libdxil = CD3DX12_SHADER_BYTECODE((void *)g_praytracing, _countof(g_praytracing));
     lib->SetDXILLibrary(&libdxil);
     // -- define which shader exports to surface from the library
     // -- if no shader exports are defined for a dxil library subobject, all shaders will be surfaced.
