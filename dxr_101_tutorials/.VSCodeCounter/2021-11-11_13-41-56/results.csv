@@ -1,0 +1,31 @@
+"filename", "language", "C++", "HLSL", "XML", "Log", "comment", "blank", "total"
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\compiled_shaders\raytracing.hlsl.h", "C++", 813, 0, 0, 0, 0, 22, 835
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\dxr_hello_triangle.vcxproj", "XML", 0, 0, 196, 0, 0, 0, 196
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\headers\dxr_hello_triangle.h", "C++", 79, 0, 0, 0, 11, 18, 108
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\headers\dxr_helper.h", "C++", 224, 0, 0, 0, 6, 12, 242
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\headers\rt_hlsl_compat.h", "C++", 13, 0, 0, 0, 0, 5, 18
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\headers\stdafx.cpp", "C++", 1, 0, 0, 0, 0, 1, 2
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\headers\stdafx.h", "C++", 25, 0, 0, 0, 0, 9, 34
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Debug\dxr_hello_triangle.log", "Log", 0, 0, 0, 9, 0, 2, 11
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\_main.nativecodeanalysis.xml", "XML", 0, 0, 2, 0, 0, 0, 2
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\device_resources.nativecodeanalysis.xml", "XML", 0, 0, 2, 0, 0, 0, 2
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\dx_sample.nativecodeanalysis.xml", "XML", 0, 0, 2, 0, 0, 0, 2
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\dxr_hello_triangle.Build.CppClean.log", "Log", 0, 0, 0, 37, 0, 1, 38
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\dxr_hello_triangle.log", "Log", 0, 0, 0, 17, 0, 1, 18
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\dxr_hello_triangle.nativecodeanalysis.xml", "XML", 0, 0, 332, 0, 0, 0, 332
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\stdafx.nativecodeanalysis.xml", "XML", 0, 0, 419, 0, 0, 0, 419
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\vc.nativecodeanalysis.all.xml", "XML", 0, 0, 690, 0, 0, 0, 690
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\win32_app.nativecodeanalysis.xml", "XML", 0, 0, 2, 0, 0, 0, 2
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\raytracing.hlsl", "HLSL", 0, 47, 0, 0, 7, 10, 64
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\src\_main.cpp", "C++", 7, 0, 0, 0, 0, 2, 9
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\src\dxr_hello_triangle.cpp", "C++", 422, 0, 0, 0, 104, 73, 599
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\d3dx12.h", "C++", 3673, 0, 0, 0, 177, 203, 4053
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\device_resources.cpp", "C++", 419, 0, 0, 0, 41, 33, 493
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\device_resources.h", "C++", 109, 0, 0, 0, 10, 18, 137
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\dx_sample.cpp", "C++", 52, 0, 0, 0, 1, 3, 56
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\dx_sample.h", "C++", 43, 0, 0, 0, 5, 12, 60
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\dx_sample_helper.h", "C++", 196, 0, 0, 0, 13, 34, 243
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\step_timer.h", "C++", 91, 0, 0, 0, 21, 16, 128
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\win32_app.cpp", "C++", 195, 0, 0, 0, 12, 15, 222
+"d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\win32_app.h", "C++", 18, 0, 0, 0, 0, 5, 23
+"Total", "-", 6380, 47, 1645, 63, 408, 495, 9038

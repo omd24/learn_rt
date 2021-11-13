@@ -1,0 +1,65 @@
+Date : 2021-11-11 13:41:56
+Directory : d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials
+Total : 29 files,  8135 codes, 408 comments, 495 blanks, all 9038 lines
+
+Languages
++----------+------------+------------+------------+------------+------------+
+| language | files      | code       | comment    | blank      | total      |
++----------+------------+------------+------------+------------+------------+
+| C++      |         17 |      6,380 |        401 |        481 |      7,262 |
+| XML      |          8 |      1,645 |          0 |          0 |      1,645 |
+| Log      |          3 |         63 |          0 |          4 |         67 |
+| HLSL     |          1 |         47 |          7 |         10 |         64 |
++----------+------------+------------+------------+------------+------------+
+
+Directories
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| path                                                                                                                                                                    | files      | code       | comment    | blank      | total      |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+| .                                                                                                                                                                       |         29 |      8,135 |        408 |        495 |      9,038 |
+| dxr_hello_triangle                                                                                                                                                      |         20 |      3,339 |        128 |        156 |      3,623 |
+| dxr_hello_triangle\compiled_shaders                                                                                                                                     |          1 |        813 |          0 |         22 |        835 |
+| dxr_hello_triangle\headers                                                                                                                                              |          5 |        342 |         17 |         45 |        404 |
+| dxr_hello_triangle\obj                                                                                                                                                  |         10 |      1,512 |          0 |          4 |      1,516 |
+| dxr_hello_triangle\obj\x64                                                                                                                                              |         10 |      1,512 |          0 |          4 |      1,516 |
+| dxr_hello_triangle\obj\x64\Debug                                                                                                                                        |          1 |          9 |          0 |          2 |         11 |
+| dxr_hello_triangle\obj\x64\Release                                                                                                                                      |          9 |      1,503 |          0 |          2 |      1,505 |
+| dxr_hello_triangle\src                                                                                                                                                  |          2 |        429 |        104 |         75 |        608 |
+| utils                                                                                                                                                                   |          9 |      4,796 |        280 |        339 |      5,415 |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------+------------+------------+------------+------------+------------+
+
+Files
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------+------------+------------+------------+------------+
+| filename                                                                                                                                                                | language | code       | comment    | blank      | total      |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------+------------+------------+------------+------------+
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\compiled_shaders\raytracing.hlsl.h                        | C++      |        813 |          0 |         22 |        835 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\dxr_hello_triangle.vcxproj                                | XML      |        196 |          0 |          0 |        196 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\headers\dxr_hello_triangle.h                              | C++      |         79 |         11 |         18 |        108 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\headers\dxr_helper.h                                      | C++      |        224 |          6 |         12 |        242 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\headers\rt_hlsl_compat.h                                  | C++      |         13 |          0 |          5 |         18 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\headers\stdafx.cpp                                        | C++      |          1 |          0 |          1 |          2 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\headers\stdafx.h                                          | C++      |         25 |          0 |          9 |         34 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Debug\dxr_hello_triangle.log                      | Log      |          9 |          0 |          2 |         11 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\_main.nativecodeanalysis.xml              | XML      |          2 |          0 |          0 |          2 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\device_resources.nativecodeanalysis.xml   | XML      |          2 |          0 |          0 |          2 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\dx_sample.nativecodeanalysis.xml          | XML      |          2 |          0 |          0 |          2 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\dxr_hello_triangle.Build.CppClean.log     | Log      |         37 |          0 |          1 |         38 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\dxr_hello_triangle.log                    | Log      |         17 |          0 |          1 |         18 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\dxr_hello_triangle.nativecodeanalysis.xml | XML      |        332 |          0 |          0 |        332 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\stdafx.nativecodeanalysis.xml             | XML      |        419 |          0 |          0 |        419 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\vc.nativecodeanalysis.all.xml             | XML      |        690 |          0 |          0 |        690 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\obj\x64\Release\win32_app.nativecodeanalysis.xml          | XML      |          2 |          0 |          0 |          2 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\raytracing.hlsl                                           | HLSL     |         47 |          7 |         10 |         64 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\src\_main.cpp                                             | C++      |          7 |          0 |          2 |          9 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\dxr_hello_triangle\src\dxr_hello_triangle.cpp                                | C++      |        422 |        104 |         73 |        599 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\d3dx12.h                                                               | C++      |      3,673 |        177 |        203 |      4,053 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\device_resources.cpp                                                   | C++      |        419 |         41 |         33 |        493 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\device_resources.h                                                     | C++      |        109 |         10 |         18 |        137 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\dx_sample.cpp                                                          | C++      |         52 |          1 |          3 |         56 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\dx_sample.h                                                            | C++      |         43 |          5 |         12 |         60 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\dx_sample_helper.h                                                     | C++      |        196 |         13 |         34 |        243 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\step_timer.h                                                           | C++      |         91 |         21 |         16 |        128 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\win32_app.cpp                                                          | C++      |        195 |         12 |         15 |        222 |
+| d:\Users\omidm\Documents\Visual Studio 2019\Projects\RayTracing\learn_rt\dxr_101_tutorials\utils\win32_app.h                                                            | C++      |         18 |          0 |          5 |         23 |
+| Total                                                                                                                                                                   |          |      8,135 |        408 |        495 |      9,038 |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------+----------+------------+------------+------------+------------+
