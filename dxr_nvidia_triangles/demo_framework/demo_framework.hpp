@@ -7,17 +7,17 @@
 #include <windows.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
-#include <glm/glm.hpp>
+#include <externals/glm/glm.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
-#include "glm/gtx/transform.hpp"
-#include "glm/gtx/euler_angles.hpp"
+#include <externals/glm/gtx/transform.hpp>
+#include <externals/glm/gtx/euler_angles.hpp>
 #include <string>
 #include <d3d12.h>
 #include <comdef.h>
 #include <dxgi1_4.h>
 #include <dxgiformat.h>
 #include <fstream>
-#include <dxcapi/dxcapi.use.h>
+#include <externals/dxcapi/dxcapi.use.h>
 #include <vector>
 #include <array>
 
@@ -53,7 +53,7 @@ struct Framework {
     static void Run (
         Demo & demo,
         std::string const & wndtitle,
-        uint32_t w = 1920, uint32_t h = 1200
+        uint32_t w = 1280, uint32_t h = 720
     );
 };
 

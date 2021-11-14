@@ -96,7 +96,11 @@ std::string WStrToStr (std::wstring const & wstr) {
     return str;
 }
 
-void Framework::Run (Demo & demo, std::string const & wndtitle, uint32_t w, uint32_t h) {
+void Framework::Run (
+    Demo & demo,
+    std::string const & wndtitle,
+    uint32_t w, uint32_t h
+) {
     g_hwnd = create_window(wndtitle, w, h);
 
     // -- calculate client-rect area
