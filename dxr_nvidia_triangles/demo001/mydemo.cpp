@@ -124,6 +124,223 @@ submit_cmdlist (
     cmdque->Signal(fence, fence_value);
     return fence_value;
 }
+static constexpr D3D12_HEAP_PROPERTIES UploadHeapProps = {
+    .Type                   = D3D12_HEAP_TYPE_UPLOAD,
+    .CPUPageProperty        = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+    .MemoryPoolPreference   = D3D12_MEMORY_POOL_UNKNOWN,
+    .CreationNodeMask       = 0,
+    .VisibleNodeMask        = 0
+};
+static constexpr D3D12_HEAP_PROPERTIES DefaultHeapProps = {
+    .Type                   = D3D12_HEAP_TYPE_DEFAULT,
+    .CPUPageProperty        = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+    .MemoryPoolPreference   = D3D12_MEMORY_POOL_UNKNOWN,
+    .CreationNodeMask       = 0,
+    .VisibleNodeMask        = 0
+};
+static ID3D12ResourcePtr
+create_buffer (
+    ID3D12Device5Ptr dev, uint64_t size,
+    D3D12_RESOURCE_FLAGS flags, D3D12_RESOURCE_STATES init_state,
+    D3D12_HEAP_PROPERTIES const & heap_props
+) {
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Alignment = 0;
+    desc.DepthOrArraySize = 1;
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Flags = flags;
+    desc.Format = DXGI_FORMAT_UNKNOWN;
+    desc.Width = size;
+    desc.Height = 1;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    desc.MipLevels = 1;
+    desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
+
+    ID3D12ResourcePtr buffer;
+    D3D_CALL(dev->CreateCommittedResource(
+        &heap_props, D3D12_HEAP_FLAG_NONE, &desc, init_state, nullptr, IID_PPV_ARGS(&buffer)));
+    return buffer;
+}
+static ID3D12ResourcePtr
+create_triangle_vb (ID3D12Device5Ptr dev) {
+    vec3 const vertices [] = {
+        vec3(0, 1, 0),
+        vec3(0.8f, -0.5f, 0),
+        vec3(-0.8f, -0.5f, 0),
+    };
+    // -- for simplicity, we create vb on an upload heap but in practice a default heap is recommended
+    // -- though an upload buffer would be needed for updating data to the vb
+    ID3D12ResourcePtr buffer = create_buffer(dev, sizeof(vertices), D3D12_RESOURCE_FLAG_NONE,
+        D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
+    uint8_t * data;
+    buffer->Map(0, nullptr, (void **)&data);
+    memcpy(data, vertices, sizeof(vertices));
+    buffer->Unmap(0, nullptr);
+    return buffer;
+}
+struct AccelerationStructureBuffers {
+    ID3D12ResourcePtr Scratch;
+    ID3D12ResourcePtr Result;
+    ID3D12ResourcePtr InstanceDesc; // only for Top-Level AS
+};
+static AccelerationStructureBuffers
+create_bottom_level_as (
+    ID3D12Device5Ptr dev,
+    ID3D12GraphicsCommandList4Ptr cmdlist,
+    ID3D12ResourcePtr vb
+) {
+    D3D12_RAYTRACING_GEOMETRY_DESC geom_desc = {};
+    geom_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+    geom_desc.Triangles.VertexBuffer.StartAddress = vb->GetGPUVirtualAddress();
+    geom_desc.Triangles.VertexBuffer.StrideInBytes = sizeof(vec3);
+    geom_desc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+    geom_desc.Triangles.VertexCount = 3;
+    geom_desc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
+    inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
+    inputs.NumDescs = 1;
+    inputs.pGeometryDescs = &geom_desc;
+    inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+
+    // -- get the required info (e.g., size) for scratch and AS buffers:
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info = {};
+    dev->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
+
+    // -- create the buffers, they need to support UAV,
+    // -- and since we're gonna use them immediately, create them with an unordererd-access state:
+    AccelerationStructureBuffers buffers = {};
+    buffers.Scratch = create_buffer(
+        dev,
+        info.ScratchDataSizeInBytes,
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        DefaultHeapProps
+    );
+    buffers.Result = create_buffer(
+        dev,
+        info.ResultDataMaxSizeInBytes,
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
+        DefaultHeapProps
+    );
+
+    // -- now create the bottom-level AS:
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC blas_desc = {};
+    blas_desc.Inputs = inputs; // type: BOTTOM_LEVEL
+    blas_desc.DestAccelerationStructureData = buffers.Result->GetGPUVirtualAddress();
+    blas_desc.ScratchAccelerationStructureData = buffers.Scratch->GetGPUVirtualAddress();
+
+    cmdlist->BuildRaytracingAccelerationStructure(&blas_desc, 0, nullptr);
+
+    // -- we need to insert a UAV barrier before using the AS in raytracing operation:
+    D3D12_RESOURCE_BARRIER uav_barrier = {};
+    uav_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uav_barrier.UAV.pResource = buffers.Result;
+    cmdlist->ResourceBarrier(1, &uav_barrier);
+
+    return buffers;
+}
+static AccelerationStructureBuffers
+create_top_level_as (
+    ID3D12Device5Ptr dev,
+    ID3D12GraphicsCommandList4Ptr cmdlist,
+    ID3D12ResourcePtr bottom_level_as,
+    uint64_t & tlas_size
+) {
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
+    inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
+    inputs.NumDescs = 1;
+    inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+
+    // -- get size of TLAS buffers:
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info = {};
+    dev->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
+
+    // -- create the buffers:
+    AccelerationStructureBuffers buffers = {};
+    buffers.Scratch = create_buffer(
+        dev,
+        info.ScratchDataSizeInBytes,
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        DefaultHeapProps
+    );
+    buffers.Result = create_buffer(
+        dev,
+        info.ResultDataMaxSizeInBytes,
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
+        DefaultHeapProps
+    );
+
+    // -- output size:
+    tlas_size = info.ResultDataMaxSizeInBytes;
+
+    // NOTE(omid): InstanceDesc should be inside a buffer 
+    // -- create and map the corresponding buffer:
+    buffers.InstanceDesc = create_buffer(
+        dev,
+        sizeof(D3D12_RAYTRACING_INSTANCE_DESC),
+        D3D12_RESOURCE_FLAG_NONE,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        UploadHeapProps
+    );
+    D3D12_RAYTRACING_INSTANCE_DESC * inst_desc = nullptr;
+    buffers.InstanceDesc->Map(0, nullptr, (void **)&inst_desc);
+
+    // -- initialize the InstanceDesc (we only have one instance)
+    inst_desc->InstanceID = 0; // this value is exposed to shader via InstanceID()
+    inst_desc->InstanceContributionToHitGroupIndex = 0; // this is offset inside shader table
+    inst_desc->Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+    mat4 mat; // identity matrix
+    memcpy(inst_desc->Transform, &mat, sizeof(inst_desc->Transform));
+    inst_desc->AccelerationStructure = bottom_level_as->GetGPUVirtualAddress();
+    inst_desc->InstanceMask = 0xff;
+
+    // -- unmap when done:
+    buffers.InstanceDesc->Unmap(0, nullptr);
+
+    // -- now create the top-level AS
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC tlas_desc = {};
+    tlas_desc.Inputs = inputs; // type: TOP_LEVEL
+    tlas_desc.Inputs.InstanceDescs = buffers.InstanceDesc->GetGPUVirtualAddress();
+    tlas_desc.DestAccelerationStructureData = buffers.Result->GetGPUVirtualAddress();
+    tlas_desc.ScratchAccelerationStructureData = buffers.Scratch->GetGPUVirtualAddress();
+
+    cmdlist->BuildRaytracingAccelerationStructure(&tlas_desc, 0, nullptr);
+
+    // -- we need to insert a UAV barrier before using the AS in raytracing operation:
+    D3D12_RESOURCE_BARRIER uav_barrier = {};
+    uav_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    uav_barrier.UAV.pResource = buffers.Result;
+    cmdlist->ResourceBarrier(1, &uav_barrier);
+
+    return buffers;
+}
+// ==============================================================================================================
+void MyDemo::create_acceleration_structure () {
+    vertex_buffer_ = create_triangle_vb(dev_);
+    AccelerationStructureBuffers bottom_level_buffers =
+        create_bottom_level_as(dev_, cmdlist_, vertex_buffer_);
+    AccelerationStructureBuffers top_level_buffers =
+        create_top_level_as(dev_, cmdlist_, bottom_level_buffers.Result, tlas_size_);
+
+    // -- we don't have any resource lifetime management so we flush and sync here
+    // -- if we had resource lifetime mgmt we could submit list whenever we like
+    fence_value_ = submit_cmdlist(cmdlist_, cmdque_, fence_, fence_value_);
+    fence_->SetEventOnCompletion(fence_value_, fence_event_);
+    WaitForSingleObject(fence_event_, INFINITE);
+    uint32_t buffer_index = swapchain_->GetCurrentBackBufferIndex();
+    cmdlist_->Reset(FrameObjects_[0].cmdalloc_, nullptr);
+
+    // -- store the AS final (aka result) buffers. The rest of the buffers will be released once we exit the function
+    top_level_as_ = top_level_buffers.Result;
+    bottom_level_as_ = bottom_level_buffers.Result;
+}
 void MyDemo::init_dxr (HWND hwnd, uint32_t w, uint32_t h) {
     hwnd_ = hwnd;
     swapchain_size_ = uvec2(w, h);
@@ -186,11 +403,12 @@ void MyDemo::end_frame (uint32_t rtv_idx) {
 
 void MyDemo::OnLoad (HWND hwnd, uint32_t w, uint32_t h) {
     init_dxr(hwnd, w, h);
+    create_acceleration_structure();
 }
 void MyDemo::OnFrameRender () {
     uint32_t rtv_idx = begin_frame();
     float const clear_color[4] = {0.4f, 0.6f, 0.2f, 1.0f};
-    resource_barrier(cmdlist_, FrameObjects_[rtv_idx].swapchain_buffer_, 
+    resource_barrier(cmdlist_, FrameObjects_[rtv_idx].swapchain_buffer_,
         D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     cmdlist_->ClearRenderTargetView(FrameObjects_[rtv_idx].hcpu_rtv_, clear_color, 0, nullptr);
     end_frame(rtv_idx);
@@ -207,7 +425,7 @@ int WINAPI WinMain (
     _In_ HINSTANCE inst,
     _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int
 ) {
-    Framework::Run(MyDemo(), "Init DXR");
+    Framework::Run(MyDemo(), "Acceleration Structure");
     return(0);
 }
 

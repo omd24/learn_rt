@@ -15,6 +15,11 @@ private:
 
     HWND hwnd_ = nullptr;
 
+    ID3D12ResourcePtr vertex_buffer_;
+    ID3D12ResourcePtr top_level_as_;
+    ID3D12ResourcePtr bottom_level_as_;
+    uint64_t tlas_size_ = 0;
+
     struct {
         ID3D12CommandAllocatorPtr cmdalloc_;
         ID3D12ResourcePtr swapchain_buffer_;
@@ -31,6 +36,7 @@ private:
     void init_dxr (HWND hwnd, uint32_t w, uint32_t h);
     uint32_t begin_frame ();
     void end_frame (uint32_t rtv_idx);
+    void create_acceleration_structure ();
 public:
     void OnLoad (HWND hwnd, uint32_t w, uint32_t h) override;
     void OnFrameRender () override;
