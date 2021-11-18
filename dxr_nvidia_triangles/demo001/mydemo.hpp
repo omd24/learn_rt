@@ -33,10 +33,17 @@ private:
     HeapData rtv_heap_;
     static constexpr uint32_t RtvHeapSize = 3; // swapchain buffer count?
 
+    ID3D12StateObjectPtr rtpso_; // raytracing PSO is completely different than graphics and compute PSOs
+    ID3D12RootSignaturePtr empty_root_sig_;
+
+
     void init_dxr (HWND hwnd, uint32_t w, uint32_t h);
     uint32_t begin_frame ();
     void end_frame (uint32_t rtv_idx);
     void create_acceleration_structure ();
+    void create_rtpso (); // create completely different than graphics and compute PSOs
+
+
 public:
     void OnLoad (HWND hwnd, uint32_t w, uint32_t h) override;
     void OnFrameRender () override;

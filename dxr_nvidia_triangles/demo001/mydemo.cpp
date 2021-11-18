@@ -1,5 +1,13 @@
 #include "mydemo.hpp"
 
+static dxc::DxcDllSupport g_dxc_dll_helper;
+MAKE_SMART_COM_PTR(IDxcCompiler);
+MAKE_SMART_COM_PTR(IDxcLibrary);
+MAKE_SMART_COM_PTR(IDxcBlobEncoding);
+MAKE_SMART_COM_PTR(IDxcOperationResult);
+
+#pragma region Initializing DXR:
+
 static IDXGISwapChain3Ptr
 create_swapchain (
     IDXGIFactory4Ptr factory, HWND hwnd,
@@ -124,6 +132,11 @@ submit_cmdlist (
     cmdque->Signal(fence, fence_value);
     return fence_value;
 }
+
+#pragma endregion Initializing DXR
+
+#pragma region Creating Acceleration Structure:
+
 static constexpr D3D12_HEAP_PROPERTIES UploadHeapProps = {
     .Type                   = D3D12_HEAP_TYPE_UPLOAD,
     .CPUPageProperty        = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -321,6 +334,65 @@ create_top_level_as (
 
     return buffers;
 }
+
+#pragma endregion Creating Acceleration Structure
+
+#pragma region Creating RTPSO
+// -- use dxc library to compile a shader and return the compiled code as a blob
+static ID3DBlobPtr
+compile_library (WCHAR const * filename, WCHAR const * targetstr) {
+    // -- init the helper:
+    D3D_CALL(g_dxc_dll_helper.Initialize());
+    IDxcCompilerPtr compiler;
+    IDxcLibraryPtr library;
+    D3D_CALL(g_dxc_dll_helper.CreateInstance(CLSID_DxcCompiler, &compiler));
+    D3D_CALL(g_dxc_dll_helper.CreateInstance(CLSID_DxcLibrary, &library));
+
+    // -- open and read the file:
+    std::ifstream shader_file(filename);
+    if (false == shader_file.good()) {
+        MsgBox("Can't open file " + WStrToStr(std::wstring(filename)));
+        return nullptr;
+    }
+    std::stringstream str_stream;
+    str_stream << shader_file.rdbuf();
+    std::string shader = str_stream.str();
+
+    // -- create blob from string:
+    IDxcBlobEncodingPtr txtblob;
+    D3D_CALL(library->CreateBlobWithEncodingFromPinned(
+        (LPBYTE)shader.c_str(), (uint32_t)shader.size(),
+        0, &txtblob
+    ));
+
+    // -- compile the shader (via blob):
+    IDxcOperationResultPtr result;
+    D3D_CALL(compiler->Compile(
+        txtblob, filename, L"", targetstr,
+        nullptr, 0, nullptr, 0, nullptr,
+        &result
+    ));
+
+    // -- verify the result:
+    HRESULT hr;
+    D3D_CALL(result->GetStatus(&hr));
+    if (FAILED(hr)) {
+        IDxcBlobEncodingPtr err;
+        D3D_CALL(result->GetErrorBuffer(&err));
+        std::string log = ConvertBlobToString(err.GetInterfacePtr());
+        MsgBox("Compile Error:\n" + log);
+        return nullptr;
+    }
+
+    MAKE_SMART_COM_PTR(IDxcBlob);
+    IDxcBlobPtr blob;
+    D3D_CALL(result->GetResult(&blob));
+    return blob;
+}
+
+#pragma endregion
+
+
 // ==============================================================================================================
 void MyDemo::create_acceleration_structure () {
     vertex_buffer_ = create_triangle_vb(dev_);

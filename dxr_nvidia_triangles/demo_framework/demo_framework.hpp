@@ -19,6 +19,8 @@
 #include <dxgi1_4.h>
 #include <dxgiformat.h>
 #include <fstream>
+#include <iostream>
+#include <sstream>
 #include <externals/dxcapi/dxcapi.use.h>
 #include <vector>
 #include <array>
