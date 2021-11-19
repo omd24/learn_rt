@@ -337,7 +337,7 @@ create_top_level_as (
 
 #pragma endregion Creating Acceleration Structure
 
-#pragma region Creating RTPSO
+#pragma region Creating State Subobjects:
 // -- use dxc library to compile a shader and return the compiled code as a blob
 static ID3DBlobPtr
 compile_library (WCHAR const * filename, WCHAR const * targetstr) {
@@ -389,11 +389,202 @@ compile_library (WCHAR const * filename, WCHAR const * targetstr) {
     D3D_CALL(result->GetResult(&blob));
     return blob;
 }
+static ID3D12RootSignaturePtr
+create_root_sig (ID3D12Device5Ptr dev, D3D12_ROOT_SIGNATURE_DESC const & desc) {
+    ID3DBlobPtr sig_blob;
+    ID3DBlobPtr err_blob;
+    HRESULT hr = D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig_blob, &err_blob);
+    if (FAILED(hr)) {
+        std::string msg = ConvertBlobToString(err_blob.GetInterfacePtr());
+        MsgBox(msg);
+        return nullptr;
+    }
+    ID3D12RootSignaturePtr root_sig;
+    D3D_CALL(dev->CreateRootSignature(
+        0, sig_blob->GetBufferPointer(), sig_blob->GetBufferSize(), IID_PPV_ARGS(&root_sig)));
+    return root_sig;
+}
 
-#pragma endregion
+struct RootSigDesc {
+    D3D12_ROOT_SIGNATURE_DESC desc = {};
+    std::vector<D3D12_DESCRIPTOR_RANGE> ranges;
+    std::vector<D3D12_ROOT_PARAMETER> root_params;
+};
+static RootSigDesc
+create_raygen_root_sig_desc () {
+    RootSigDesc ret = {};
+    ret.ranges.resize(2);
+
+    // -- output:
+    ret.ranges[0].BaseShaderRegister = 0;
+    ret.ranges[0].NumDescriptors = 1;
+    ret.ranges[0].RegisterSpace = 0;
+    ret.ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    ret.ranges[0].OffsetInDescriptorsFromTableStart = 0;
+
+    // -- scene:
+    ret.ranges[1].BaseShaderRegister = 0;
+    ret.ranges[1].NumDescriptors = 1;
+    ret.ranges[1].RegisterSpace = 0;
+    ret.ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    ret.ranges[1].OffsetInDescriptorsFromTableStart = 1;
+
+    ret.root_params.resize(1);
+    ret.root_params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    ret.root_params[0].DescriptorTable.NumDescriptorRanges = (UINT)ret.ranges.size();
+    ret.root_params[0].DescriptorTable.pDescriptorRanges = ret.ranges.data();
+
+    ret.desc.NumParameters = (UINT)ret.root_params.size();
+    ret.desc.pParameters = ret.root_params.data();
+    ret.desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+    return ret;
+}
+
+struct DxilLibrary {
+    D3D12_DXIL_LIBRARY_DESC DxilLibDesc = {};
+    D3D12_STATE_SUBOBJECT StateSubobj = {};
+    ID3DBlobPtr ShaderBlob = {};
+    std::vector<D3D12_EXPORT_DESC> ExportDescs;
+    std::vector<std::wstring> ExportNames;
+
+    DxilLibrary (ID3DBlobPtr blob, WCHAR const * entry_points [], uint32_t entry_point_count)
+        : ShaderBlob(blob)
+    {
+        StateSubobj.Type = D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY;
+        StateSubobj.pDesc = &DxilLibDesc;
+        DxilLibDesc = {};
+        ExportDescs.resize(entry_point_count);
+        ExportNames.resize(entry_point_count);
+        if (blob) {
+            DxilLibDesc.DXILLibrary.pShaderBytecode = blob->GetBufferPointer();
+            DxilLibDesc.DXILLibrary.BytecodeLength = blob->GetBufferSize();
+            DxilLibDesc.NumExports = entry_point_count;
+            DxilLibDesc.pExports = ExportDescs.data();
+
+            for (uint32_t i = 0; i < entry_point_count; ++i) {
+                ExportNames[i] = entry_points[i];
+                ExportDescs[i].Name = ExportNames[i].c_str();
+                ExportDescs[i].Flags = D3D12_EXPORT_FLAG_NONE;
+                ExportDescs[i].ExportToRename = nullptr;
+            }
+        }
+    }
+
+    DxilLibrary () : DxilLibrary(nullptr, nullptr, 0) {}
+};
+
+static constexpr WCHAR * RayGenShader = L"raygen";
+static constexpr WCHAR * MissShader = L"miss";
+static constexpr WCHAR * ClosestHitShader = L"chs";
+static constexpr WCHAR * HitGroup = L"hitgroup";
+
+static DxilLibrary
+create_dxil_library () {
+    // -- compile shader:
+    ID3DBlobPtr dxil_lib = compile_library(L"shaders/default.hlsl", L"lib_6_3");
+    wchar_t const * entry_points [] = {RayGenShader, MissShader, ClosestHitShader};
+    return DxilLibrary(dxil_lib, entry_points, _countof(entry_points));
+}
+
+struct HitProgram {
+    std::wstring ExportName;
+    D3D12_HIT_GROUP_DESC Desc;
+    D3D12_STATE_SUBOBJECT Subobject;
+
+    HitProgram (LPCWSTR ahs_export, LPCWSTR chs_export, std::wstring const & name) : ExportName(name) {
+        Desc = {};
+        Desc.AnyHitShaderImport = ahs_export;
+        Desc.ClosestHitShaderImport = chs_export;
+        Desc.HitGroupExport = ExportName.c_str();
+
+        Subobject.Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
+        Subobject.pDesc = &Desc;
+    }
+};
+
+struct ExportAssociation {
+    D3D12_STATE_SUBOBJECT Subobject = {};
+    D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION Association = {};
+
+    ExportAssociation (
+        WCHAR const * export_names [], uint32_t export_count,
+        D3D12_STATE_SUBOBJECT const * subobj_to_associate
+    ) {
+        Association.NumExports = export_count;
+        Association.pExports = export_names;
+        Association.pSubobjectToAssociate = subobj_to_associate;
+
+        Subobject.Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
+        Subobject.pDesc = &Association;
+    }
+};
+
+struct LocalRootSig {
+    ID3D12RootSignaturePtr RootSig;
+    ID3D12RootSignature * Interface = nullptr;
+    D3D12_STATE_SUBOBJECT Subobject = {};
+    LocalRootSig (ID3D12Device5Ptr dev, D3D12_ROOT_SIGNATURE_DESC const & desc) {
+        RootSig = create_root_sig(dev, desc);
+        Interface = RootSig.GetInterfacePtr();
+        Subobject.pDesc = &Interface;
+        Subobject.Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE;
+    }
+};
+
+struct GlobalRootSig {
+    ID3D12RootSignaturePtr RootSig;
+    ID3D12RootSignature * Interface = nullptr;
+    D3D12_STATE_SUBOBJECT Subobject = {};
+    GlobalRootSig (ID3D12Device5Ptr dev, D3D12_ROOT_SIGNATURE_DESC const & desc) {
+        RootSig = create_root_sig(dev, desc);
+        Interface = RootSig.GetInterfacePtr();
+        Subobject.pDesc = &Interface;
+        Subobject.Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
+    }
+};
+
+struct ShaderConfig {
+    D3D12_RAYTRACING_SHADER_CONFIG ShaderCfg = {};
+    D3D12_STATE_SUBOBJECT Subobject = {};
+    ShaderConfig (uint32_t max_attrib_size_in_bytes, uint32_t max_payload_size_in_bytes) {
+        ShaderCfg.MaxAttributeSizeInBytes = max_attrib_size_in_bytes;
+        ShaderCfg.MaxPayloadSizeInBytes = max_payload_size_in_bytes;
+
+        Subobject.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;
+        Subobject.pDesc = &ShaderCfg;
+    }
+};
+
+struct PipelineConfig {
+    D3D12_RAYTRACING_PIPELINE_CONFIG Cfg = {};
+    D3D12_STATE_SUBOBJECT Subobj = {};
+    PipelineConfig (uint32_t max_trace_recursion_depth) {
+        Cfg.MaxTraceRecursionDepth = max_trace_recursion_depth;
+
+        Subobj.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG;
+        Subobj.pDesc = &Cfg;
+    }
+};
+#pragma endregion Creating State Subobjects
 
 
 // ==============================================================================================================
+void MyDemo::create_rtpso () {
+    // NOTE(omid):
+    /*
+        we need 10 subobjects:
+        1 for DXIL Library
+        1 for Hit Group
+        2 for RayGen Root-Signature and the Subobject Association
+        2 for Root-Signature shared between Miss and Hit shaders (signature and association)
+        2 for Shader Config (shared between all programs). 1 for the config, 1 for the association
+        1 for Pipeline Config
+        1 for Global Root-Signature
+    */
+    ...
+}
+
 void MyDemo::create_acceleration_structure () {
     vertex_buffer_ = create_triangle_vb(dev_);
     AccelerationStructureBuffers bottom_level_buffers =
