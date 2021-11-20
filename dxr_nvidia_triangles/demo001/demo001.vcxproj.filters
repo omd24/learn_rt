@@ -6,4 +6,7 @@
   <ItemGroup>
     <ClInclude Include="mydemo.hpp" />
   </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="shaders\default.hlsl" />
+  </ItemGroup>
 </Project>

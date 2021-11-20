@@ -474,7 +474,7 @@ struct DxilLibrary {
     DxilLibrary () : DxilLibrary(nullptr, nullptr, 0) {}
 };
 
-static constexpr WCHAR * RayGenShader = L"raygen";
+static WCHAR const * RayGenShader = L"raygen";
 static constexpr WCHAR * MissShader = L"miss";
 static constexpr WCHAR * ClosestHitShader = L"chs";
 static constexpr WCHAR * HitGroup = L"hitgroup";
@@ -570,20 +570,6 @@ struct PipelineConfig {
 
 
 // ==============================================================================================================
-void MyDemo::create_rtpso () {
-    // NOTE(omid):
-    /*
-        we need 10 subobjects:
-        1 for DXIL Library
-        1 for Hit Group
-        2 for RayGen Root-Signature and the Subobject Association
-        2 for Root-Signature shared between Miss and Hit shaders (signature and association)
-        2 for Shader Config (shared between all programs). 1 for the config, 1 for the association
-        1 for Pipeline Config
-        1 for Global Root-Signature
-    */
-    ...
-}
 
 void MyDemo::create_acceleration_structure () {
     vertex_buffer_ = create_triangle_vb(dev_);
@@ -603,6 +589,70 @@ void MyDemo::create_acceleration_structure () {
     // -- store the AS final (aka result) buffers. The rest of the buffers will be released once we exit the function
     top_level_as_ = top_level_buffers.Result;
     bottom_level_as_ = bottom_level_buffers.Result;
+}
+void MyDemo::create_rtpso () {
+    // NOTE(omid):
+    /*
+        we need 10 subobjects:
+        1 for DXIL Library
+        1 for Hit Group
+        2 for RayGen Root-Signature and the Subobject Association
+        2 for Root-Signature shared between Miss and Hit shaders (signature and association)
+        2 for Shader Config (shared between all programs). 1 for the config, 1 for the association
+        1 for Pipeline Config
+        1 for Global Root-Signature
+    */
+    std::array<D3D12_STATE_SUBOBJECT, 10> subobjs;
+    uint32_t index = 0;
+
+    // -- creaet the dxil lib:
+    DxilLibrary dxil_lib = create_dxil_library();
+    subobjs[index++] = dxil_lib.StateSubobj; // 0 Library
+
+    HitProgram hit_prog(nullptr, ClosestHitShader, HitGroup);
+    subobjs[index++] = hit_prog.Subobject; // 1 Hit Group
+
+    // -- create the raygen root-sig and association (2,3):
+    LocalRootSig raygen_root_sig(dev_, create_raygen_root_sig_desc().desc);
+    subobjs[index] = raygen_root_sig.Subobject; // 2 raygen root sig
+    uint32_t raygen_root_sig_index  = index++; // 2
+    ExportAssociation raygen_root_association(&RayGenShader, 1, &(subobjs[raygen_root_sig_index]));
+    subobjs[index++] = raygen_root_association.Subobject; // 3 associate root sig to raygen shader
+
+    // -- create the miss- and hit-programs root-sig and association (4,5):
+    D3D12_ROOT_SIGNATURE_DESC empty_desc = {};
+    empty_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+    LocalRootSig hit_miss_root_sig(dev_, empty_desc);
+    subobjs[index] = hit_miss_root_sig.Subobject; // 4 root sig to be shared between Miss and CHS
+    uint32_t hit_miss_root_index = index++; // 4
+    WCHAR const * miss_hit_export_names [] = {MissShader, ClosestHitShader};
+    ExportAssociation miss_hit_root_association(
+        miss_hit_export_names, _countof(miss_hit_export_names), &subobjs[hit_miss_root_index]);
+    subobjs[index++] = miss_hit_root_association.Subobject; // 5 Associate Root Sig to Miss and CHS
+
+    // -- bind payload size to the programs (6,7):
+    ShaderConfig shader_cfg(sizeof(float) * 2, sizeof(float) * 1);
+    subobjs[index] = shader_cfg.Subobject; // 6 shader cfg
+    uint32_t shader_cfg_index = index++; // 6
+    WCHAR const * shader_exports[] = {MissShader, ClosestHitShader, RayGenShader};
+    ExportAssociation cfg_association(shader_exports, _countof(shader_exports), &(subobjs[shader_cfg_index]));
+    subobjs[index++] = cfg_association.Subobject; // 7 associate shader config to Miss, CHS, raygen
+
+    // -- create pipeline cfg
+    PipelineConfig cfg(0);
+    subobjs[index++] = cfg.Subobj; // 8
+
+    // -- create global root sig and store the empty signature
+    GlobalRootSig root_sig(dev_, {});
+    empty_root_sig_ = root_sig.Interface;
+    subobjs[index++] = root_sig.Subobject; // 9
+
+    // -- create RTPSO:
+    D3D12_STATE_OBJECT_DESC desc = {};
+    desc.NumSubobjects = index; // 10
+    desc.pSubobjects = subobjs.data();
+    desc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
+    D3D_CALL(dev_->CreateStateObject(&desc, IID_PPV_ARGS(&rtpso_)));
 }
 void MyDemo::init_dxr (HWND hwnd, uint32_t w, uint32_t h) {
     hwnd_ = hwnd;
@@ -667,6 +717,7 @@ void MyDemo::end_frame (uint32_t rtv_idx) {
 void MyDemo::OnLoad (HWND hwnd, uint32_t w, uint32_t h) {
     init_dxr(hwnd, w, h);
     create_acceleration_structure();
+    create_rtpso();
 }
 void MyDemo::OnFrameRender () {
     uint32_t rtv_idx = begin_frame();
