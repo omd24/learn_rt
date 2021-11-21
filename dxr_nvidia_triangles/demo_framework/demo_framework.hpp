@@ -1,6 +1,7 @@
 #pragma once
 
 #pragma warning (disable: 26495)    // not initializing struct members
+#pragma warning (disable: 6387)     // not checking for initialized pointer
 
 #define _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS     // -- disable C++17 warning about deprecated old funcs
 

@@ -475,7 +475,7 @@ struct DxilLibrary {
 };
 
 static WCHAR const * RayGenShader = L"raygen";
-static constexpr WCHAR * MissShader = L"miss";
+static WCHAR const * MissShader = L"miss";
 static constexpr WCHAR * ClosestHitShader = L"chs";
 static constexpr WCHAR * HitGroup = L"hitgroup";
 
@@ -568,6 +568,67 @@ struct PipelineConfig {
 };
 #pragma endregion Creating State Subobjects
 
+// ==============================================================================================================
+
+void MyDemo::init_dxr (HWND hwnd, uint32_t w, uint32_t h) {
+    hwnd_ = hwnd;
+    swapchain_size_ = uvec2(w, h);
+
+#if defined(_DEBUG)
+    ID3D12DebugPtr dbg;
+    if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg))))
+        dbg->EnableDebugLayer();
+#endif
+
+    // -- create d3d objects:
+    IDXGIFactory4Ptr factory;
+    D3D_CALL(CreateDXGIFactory1(IID_PPV_ARGS(&factory)));
+    dev_ = create_device(factory);
+    cmdque_ = create_cmdque(dev_);
+    swapchain_ = create_swapchain(factory, hwnd, w, h, DXGI_FORMAT_R8G8B8A8_UNORM, cmdque_);
+
+    // -- create RTV descriptor heap
+    rtv_heap_.heap_ = create_descriptor_heap(dev_, RtvHeapSize, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, false);
+
+    // -- create [per] frame objects:
+    for (uint32_t i = 0; i < DefaultSwapchainBufferCount; ++i) {
+        D3D_CALL(dev_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&FrameObjects_[i].cmdalloc_)));
+        D3D_CALL(swapchain_->GetBuffer(i, IID_PPV_ARGS(&FrameObjects_[i].swapchain_buffer_)));
+        FrameObjects_[i].hcpu_rtv_ = create_rtv(
+            dev_, FrameObjects_[i].swapchain_buffer_,
+            rtv_heap_.heap_, rtv_heap_.used_entries_,
+            DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
+        );
+    }
+
+    // -- create cmdlist
+    D3D_CALL(dev_->CreateCommandList(
+        0, D3D12_COMMAND_LIST_TYPE_DIRECT, FrameObjects_[0].cmdalloc_, nullptr, IID_PPV_ARGS(&cmdlist_)));
+
+    // -- create synchronization objects:
+    D3D_CALL(dev_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)));
+    fence_event_  = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+}
+uint32_t MyDemo::begin_frame () {
+    return swapchain_->GetCurrentBackBufferIndex();
+}
+void MyDemo::end_frame (uint32_t rtv_idx) {
+    resource_barrier(cmdlist_, FrameObjects_[rtv_idx].swapchain_buffer_,
+        D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+    fence_value_ = submit_cmdlist(cmdlist_, cmdque_, fence_, fence_value_);
+    swapchain_->Present(0, 0);
+
+    // -- make sure new back buffer is ready
+    if (fence_value_ > DefaultSwapchainBufferCount) {
+        fence_->SetEventOnCompletion(fence_value_ - DefaultSwapchainBufferCount + 1, fence_event_);
+        WaitForSingleObject(fence_event_, INFINITE);
+    }
+
+    // -- prepare cmdlist for next frame:
+    uint32_t buffer_idx = swapchain_->GetCurrentBackBufferIndex();
+    FrameObjects_[buffer_idx].cmdalloc_->Reset();
+    cmdlist_->Reset(FrameObjects_[buffer_idx].cmdalloc_, nullptr);
+}
 
 // ==============================================================================================================
 
@@ -634,7 +695,7 @@ void MyDemo::create_rtpso () {
     ShaderConfig shader_cfg(sizeof(float) * 2, sizeof(float) * 1);
     subobjs[index] = shader_cfg.Subobject; // 6 shader cfg
     uint32_t shader_cfg_index = index++; // 6
-    WCHAR const * shader_exports[] = {MissShader, ClosestHitShader, RayGenShader};
+    WCHAR const * shader_exports [] = {MissShader, ClosestHitShader, RayGenShader};
     ExportAssociation cfg_association(shader_exports, _countof(shader_exports), &(subobjs[shader_cfg_index]));
     subobjs[index++] = cfg_association.Subobject; // 7 associate shader config to Miss, CHS, raygen
 
@@ -654,77 +715,76 @@ void MyDemo::create_rtpso () {
     desc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
     D3D_CALL(dev_->CreateStateObject(&desc, IID_PPV_ARGS(&rtpso_)));
 }
-void MyDemo::init_dxr (HWND hwnd, uint32_t w, uint32_t h) {
-    hwnd_ = hwnd;
-    swapchain_size_ = uvec2(w, h);
+void MyDemo::create_shader_table () {
+    // NOTE(omid):
+    /*
+        Shader table layout:
+        Entry 0 - raygen program
+        Entry 1 - Miss program
+        Entry 2 - Hit program
 
-#if defined(_DEBUG)
-    ID3D12DebugPtr dbg;
-    if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg))))
-        dbg->EnableDebugLayer();
-#endif
+        Note 1:
+        All entries in the shader-table must have the same size,
+        so we choose it based on the largest entry
+        raygen program requires the largest size: sizeof(program identifier) + 8 bytes for a descriptor table
 
-    // -- create d3d objects:
-    IDXGIFactory4Ptr factory;
-    D3D_CALL(CreateDXGIFactory1(IID_PPV_ARGS(&factory)));
-    dev_ = create_device(factory);
-    cmdque_ = create_cmdque(dev_);
-    swapchain_ = create_swapchain(factory, hwnd, w, h, DXGI_FORMAT_R8G8B8A8_UNORM, cmdque_);
+        Note 2:
+        The entry size must be aligned up to D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT
+    */
 
-    // -- create RTV descriptor heap
-    rtv_heap_.heap_ = create_descriptor_heap(dev_, RtvHeapSize, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, false);
+    // -- calculate the size and create the buffer:
+    shader_table_entry_size_ = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    shader_table_entry_size_ += 8; // raygen descriptor table
+    shader_table_entry_size_ = ALIGN_TO(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT, shader_table_entry_size_);
+    uint32_t total_entry_size = 3 * shader_table_entry_size_;
 
-    // -- create [per] frame objects:
-    for (uint32_t i = 0; i < DefaultSwapchainBufferCount; ++i) {
-        D3D_CALL(dev_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&FrameObjects_[i].cmdalloc_)));
-        D3D_CALL(swapchain_->GetBuffer(i, IID_PPV_ARGS(&FrameObjects_[i].swapchain_buffer_)));
-        FrameObjects_[i].hcpu_rtv_ = create_rtv(
-            dev_, FrameObjects_[i].swapchain_buffer_,
-            rtv_heap_.heap_, rtv_heap_.used_entries_,
-            DXGI_FORMAT_R8G8B8A8_UNORM_SRGB
-        );
-    }
+    // -- for simplicity we create the shader-table on upload heap but you would create it on default heap
+    shader_table_ = create_buffer(dev_,
+        total_entry_size, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
 
-    // -- create cmdlist
-    D3D_CALL(dev_->CreateCommandList(
-        0, D3D12_COMMAND_LIST_TYPE_DIRECT, FrameObjects_[0].cmdalloc_, nullptr, IID_PPV_ARGS(&cmdlist_)));
+    // -- map the buffer
+    uint8_t * data = nullptr;
+    D3D_CALL(shader_table_->Map(0, nullptr, (void **)&data));
 
-    // -- create synchronization objects:
-    D3D_CALL(dev_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)));
-    fence_event_  = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    MAKE_SMART_COM_PTR(ID3D12StateObjectProperties);
+    ID3D12StateObjectPropertiesPtr rtpso_props;
+    rtpso_->QueryInterface(IID_PPV_ARGS(&rtpso_props));
+
+    // -- Entry 0: raygen program ID and descriptor data:
+    memcpy(data, rtpso_props->GetShaderIdentifier(RayGenShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    // -- remember to set the descriptor data for the raygen shader
+    ...
+
+    // -- Entry 1: miss program:
+    memcpy(data + shader_table_entry_size_, rtpso_props->GetShaderIdentifier(MissShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    // -- Entry 2: hit program:
+    memcpy(data + 2 * shader_table_entry_size_, rtpso_props->GetShaderIdentifier(HitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    shader_table_->Unmap(0, nullptr);
 }
-uint32_t MyDemo::begin_frame () {
-    return swapchain_->GetCurrentBackBufferIndex();
-}
-void MyDemo::end_frame (uint32_t rtv_idx) {
-    resource_barrier(cmdlist_, FrameObjects_[rtv_idx].swapchain_buffer_,
-        D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-    fence_value_ = submit_cmdlist(cmdlist_, cmdque_, fence_, fence_value_);
-    swapchain_->Present(0, 0);
 
-    // -- make sure new back buffer is ready
-    if (fence_value_ > DefaultSwapchainBufferCount) {
-        fence_->SetEventOnCompletion(fence_value_ - DefaultSwapchainBufferCount + 1, fence_event_);
-        WaitForSingleObject(fence_event_, INFINITE);
-    }
-
-    // -- prepare cmdlist for next frame:
-    uint32_t buffer_idx = swapchain_->GetCurrentBackBufferIndex();
-    FrameObjects_[buffer_idx].cmdalloc_->Reset();
-    cmdlist_->Reset(FrameObjects_[buffer_idx].cmdalloc_, nullptr);
-}
+// ==============================================================================================================
 
 void MyDemo::OnLoad (HWND hwnd, uint32_t w, uint32_t h) {
     init_dxr(hwnd, w, h);
     create_acceleration_structure();
     create_rtpso();
+    create_shader_table();
 }
 void MyDemo::OnFrameRender () {
     uint32_t rtv_idx = begin_frame();
-    float const clear_color[4] = {0.4f, 0.6f, 0.2f, 1.0f};
+
+    ...
+
+
+    /*float const clear_color[4] = {0.4f, 0.6f, 0.2f, 1.0f};
     resource_barrier(cmdlist_, FrameObjects_[rtv_idx].swapchain_buffer_,
         D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    cmdlist_->ClearRenderTargetView(FrameObjects_[rtv_idx].hcpu_rtv_, clear_color, 0, nullptr);
+    cmdlist_->ClearRenderTargetView(FrameObjects_[rtv_idx].hcpu_rtv_, clear_color, 0, nullptr);*/
+    
+    
     end_frame(rtv_idx);
 }
 void MyDemo::OnShutdown () {
@@ -739,7 +799,7 @@ int WINAPI WinMain (
     _In_ HINSTANCE inst,
     _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int
 ) {
-    Framework::Run(MyDemo(), "Acceleration Structure");
+    Framework::Run(MyDemo(), "Raytracing");
     return(0);
 }
 
