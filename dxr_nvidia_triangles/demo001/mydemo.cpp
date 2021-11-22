@@ -614,7 +614,7 @@ uint32_t MyDemo::begin_frame () {
 }
 void MyDemo::end_frame (uint32_t rtv_idx) {
     resource_barrier(cmdlist_, FrameObjects_[rtv_idx].swapchain_buffer_,
-        D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+        D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
     fence_value_ = submit_cmdlist(cmdlist_, cmdque_, fence_, fence_value_);
     swapchain_->Present(0, 0);
 
@@ -752,9 +752,8 @@ void MyDemo::create_shader_table () {
 
     // -- Entry 0: raygen program ID and descriptor data:
     memcpy(data, rtpso_props->GetShaderIdentifier(RayGenShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-
-    // -- remember to set the descriptor data for the raygen shader
-    ...
+    uint64_t heap_start_ = srv_uav_heap_->GetGPUDescriptorHandleForHeapStart().ptr;
+    *(uint64_t *)(data + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = heap_start_;
 
     // -- Entry 1: miss program:
     memcpy(data + shader_table_entry_size_, rtpso_props->GetShaderIdentifier(MissShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
@@ -764,6 +763,50 @@ void MyDemo::create_shader_table () {
 
     shader_table_->Unmap(0, nullptr);
 }
+void MyDemo::create_shader_resources () {
+    // -- create output resource, with the dimensions and format matching the swapchain
+    D3D12_RESOURCE_DESC output_desc = {};
+    output_desc.DepthOrArraySize = 1;
+    output_desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    // NOTE(omid): actually the backbuffer format is SRGB but UAV doesn't support that,
+    // -- so we convert to SRGB ourselves in the shader
+    output_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    output_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    output_desc.Width = swapchain_size_.x;
+    output_desc.Height = swapchain_size_.y;
+    output_desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    output_desc.MipLevels = 1;
+    output_desc.SampleDesc.Count = 1;
+    output_desc.SampleDesc.Quality = 0;
+    D3D_CALL(dev_->CreateCommittedResource(
+        &DefaultHeapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &output_desc,
+        D3D12_RESOURCE_STATE_COPY_SOURCE, // starting as copy-source to simplify the OnFrameRender()
+        nullptr,
+        IID_PPV_ARGS(&output_)
+    ));
+
+    // -- create SRV/UAV descriptor heap:
+    // -- we need 2 entries: 1 SRV for scene and 1 UAV for the output
+    srv_uav_heap_ = create_descriptor_heap(dev_, 2, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, true);
+
+    // -- create the UAV: 
+    // -- based on the root sig we created UAV should be the first entry (see "create_raygen_root_sig_desc")
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+    uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    dev_->CreateUnorderedAccessView(output_, nullptr, &uav_desc, srv_uav_heap_->GetCPUDescriptorHandleForHeapStart());
+
+    // -- create SRV for TLAS right after UAV
+    // -- N.B., we're using a different SRV desc here
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+    srv_desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+    srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv_desc.RaytracingAccelerationStructure.Location = top_level_as_->GetGPUVirtualAddress();
+    D3D12_CPU_DESCRIPTOR_HANDLE hcpu_srv = srv_uav_heap_->GetCPUDescriptorHandleForHeapStart();
+    hcpu_srv.ptr += dev_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    dev_->CreateShaderResourceView(nullptr, &srv_desc, hcpu_srv);
+}
 
 // ==============================================================================================================
 
@@ -771,13 +814,46 @@ void MyDemo::OnLoad (HWND hwnd, uint32_t w, uint32_t h) {
     init_dxr(hwnd, w, h);
     create_acceleration_structure();
     create_rtpso();
+    create_shader_resources();
     create_shader_table();
 }
 void MyDemo::OnFrameRender () {
     uint32_t rtv_idx = begin_frame();
 
-    ...
+    // -- raytrace:
+    resource_barrier(cmdlist_, output_, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    D3D12_DISPATCH_RAYS_DESC desc = {};
+    desc.Width = swapchain_size_.x;
+    desc.Height = swapchain_size_.y;
+    desc.Depth = 1;
 
+    // -- raygen is the first entry in the shader-table:
+    desc.RayGenerationShaderRecord.StartAddress = shader_table_->GetGPUVirtualAddress() + 0 * shader_table_entry_size_;
+    desc.RayGenerationShaderRecord.SizeInBytes = shader_table_entry_size_;
+
+    // -- miss is the second entry in the shader-table:
+    size_t miss_offset = 1 * shader_table_entry_size_;
+    desc.MissShaderTable.StartAddress = shader_table_->GetGPUVirtualAddress() + miss_offset;
+    desc.MissShaderTable.StrideInBytes = shader_table_entry_size_;
+    desc.MissShaderTable.SizeInBytes = shader_table_entry_size_; // only a single miss entry
+
+    // -- hit is the third entry in the shader table:
+    size_t hit_offset = 2 * shader_table_entry_size_;
+    desc.HitGroupTable.StartAddress = shader_table_->GetGPUVirtualAddress() + hit_offset;
+    desc.HitGroupTable.StrideInBytes = shader_table_entry_size_;
+    desc.HitGroupTable.SizeInBytes = shader_table_entry_size_;
+
+    // -- bind the empty root sig:
+    cmdlist_->SetComputeRootSignature(empty_root_sig_);
+
+    // -- dispatch call:
+    cmdlist_->SetPipelineState1(rtpso_.GetInterfacePtr());
+    cmdlist_->DispatchRays(&desc);
+
+    // -- copy the results to the backbuffer:
+    resource_barrier(cmdlist_, output_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    resource_barrier(cmdlist_, FrameObjects_[rtv_idx].swapchain_buffer_, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
+    cmdlist_->CopyResource(FrameObjects_[rtv_idx].swapchain_buffer_, output_);
 
     /*float const clear_color[4] = {0.4f, 0.6f, 0.2f, 1.0f};
     resource_barrier(cmdlist_, FrameObjects_[rtv_idx].swapchain_buffer_,
