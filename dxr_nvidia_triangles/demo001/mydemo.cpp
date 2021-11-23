@@ -610,6 +610,8 @@ void MyDemo::init_dxr (HWND hwnd, uint32_t w, uint32_t h) {
     fence_event_  = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 }
 uint32_t MyDemo::begin_frame () {
+    ID3D12DescriptorHeap * heaps[] = {srv_uav_heap_};
+    cmdlist_->SetDescriptorHeaps(_countof(heaps), heaps);
     return swapchain_->GetCurrentBackBufferIndex();
 }
 void MyDemo::end_frame (uint32_t rtv_idx) {
@@ -705,7 +707,7 @@ void MyDemo::create_rtpso () {
 
     // -- create global root sig and store the empty signature
     GlobalRootSig root_sig(dev_, {});
-    empty_root_sig_ = root_sig.Interface;
+    empty_root_sig_ = root_sig.RootSig;
     subobjs[index++] = root_sig.Subobject; // 9
 
     // -- create RTPSO:
