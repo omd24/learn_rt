@@ -10,20 +10,58 @@ float3 linear_to_srgb (float3 c) {
     return srgb;
 }
 
+struct RayPayload {
+    float3 color;
+};
+
 [shader("raygeneration")]
 void raygen () {
     uint3 launch_idx = DispatchRaysIndex();
-    float3 color = linear_to_srgb(float3(0.4, 0.6, 0.2));
+    uint3 launch_dim = DispatchRaysDimensions();
+
+    float2 coords = float2(launch_idx.xy);
+    float2 dims = float2(launch_dim.xy);
+
+    // -- normalize and shift/scale (from [0,1] to [-1,1]):
+    float2 normalized_coord = ((coords/dims) * 2.0f - 1.0f);
+    
+    float aspect_ratio = dims.x / dims.y;
+
+    RayDesc ray;
+    ray.Origin = float3(0, 0, -2);
+    ray.Direction = normalize(float3(
+        normalized_coord.x * aspect_ratio,
+        -normalized_coord.y, // y increases in the opposite direction of window
+        1.0
+    ));
+    ray.TMin = 0; // TODO(omid): in practice, this should be an epsilon value
+    ray.TMax = 100000;
+
+    RayPayload payload;
+    TraceRay(
+        g_raytracing_scene,
+        0 /*ray flags*/, 0xFF /* no object culling */, 0 /*ray index*/, 0, 0,
+        ray, payload
+    );
+
+    float3 color = linear_to_srgb(payload.color);
     g_output[launch_idx.xy] = float4(color, 1);
 }
-struct Payload {
-    bool hit; // sizeof(float)
-};
+
 [shader("miss")]
-void miss (inout Payload payload) {
-    payload.hit = false;
+void miss (inout RayPayload payload) {
+    payload.color = float3(0.4, 0.6, 0.2);
 }
 [shader("closesthit")]
-void chs (inout Payload payload, in BuiltInTriangleIntersectionAttributes attribs) {
-    payload.hit = true;
+void chs (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs) {
+    float3 barycentrics = float3(
+        1.0 - attribs.barycentrics.x - attribs.barycentrics.y,
+        barycentrics.x,
+        barycentrics.y
+    );
+
+    float3 A = float3(1, 0, 0);
+    float3 B = float3(0, 1, 0);
+    float3 C = float3(0, 0, 1);
+    payload.color = A * barycentrics.x + B * barycentrics.y + C * barycentrics.z;
 }

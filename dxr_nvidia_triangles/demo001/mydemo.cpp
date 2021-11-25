@@ -179,8 +179,8 @@ static ID3D12ResourcePtr
 create_triangle_vb (ID3D12Device5Ptr dev) {
     vec3 const vertices [] = {
         vec3(0, 1, 0),
-        vec3(0.8f, -0.5f, 0),
-        vec3(-0.8f, -0.5f, 0),
+        vec3(0.866f, -0.5f, 0),
+        vec3(-0.866f, -0.5f, 0),
     };
     // -- for simplicity, we create vb on an upload heap but in practice a default heap is recommended
     // -- though an upload buffer would be needed for updating data to the vb
@@ -476,8 +476,8 @@ struct DxilLibrary {
 
 static WCHAR const * RayGenShader = L"raygen";
 static WCHAR const * MissShader = L"miss";
-static constexpr WCHAR * ClosestHitShader = L"chs";
-static constexpr WCHAR * HitGroup = L"hitgroup";
+static WCHAR const * ClosestHitShader = L"chs";
+static WCHAR const * HitGroup = L"hitgroup";
 
 static DxilLibrary
 create_dxil_library () {
@@ -653,6 +653,9 @@ void MyDemo::create_acceleration_structure () {
     top_level_as_ = top_level_buffers.Result;
     bottom_level_as_ = bottom_level_buffers.Result;
 }
+
+// ==============================================================================================================
+
 void MyDemo::create_rtpso () {
     // NOTE(omid):
     /*
@@ -694,7 +697,7 @@ void MyDemo::create_rtpso () {
     subobjs[index++] = miss_hit_root_association.Subobject; // 5 Associate Root Sig to Miss and CHS
 
     // -- bind payload size to the programs (6,7):
-    ShaderConfig shader_cfg(sizeof(float) * 2, sizeof(float) * 1);
+    ShaderConfig shader_cfg(sizeof(float) * 2, sizeof(float) * 3);
     subobjs[index] = shader_cfg.Subobject; // 6 shader cfg
     uint32_t shader_cfg_index = index++; // 6
     WCHAR const * shader_exports [] = {MissShader, ClosestHitShader, RayGenShader};
@@ -702,7 +705,8 @@ void MyDemo::create_rtpso () {
     subobjs[index++] = cfg_association.Subobject; // 7 associate shader config to Miss, CHS, raygen
 
     // -- create pipeline cfg
-    PipelineConfig cfg(0);
+    //PipelineConfig cfg(0); // N.B., zero maxTraceRecursionDepth assumes TracyRay intrinsic is not called at all
+    PipelineConfig cfg(1); // at least maxTraceRecursionDepth 1 for raytracing
     subobjs[index++] = cfg.Subobj; // 8
 
     // -- create global root sig and store the empty signature
@@ -717,6 +721,9 @@ void MyDemo::create_rtpso () {
     desc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
     D3D_CALL(dev_->CreateStateObject(&desc, IID_PPV_ARGS(&rtpso_)));
 }
+
+// ==============================================================================================================
+
 void MyDemo::create_shader_table () {
     // NOTE(omid):
     /*
@@ -765,6 +772,9 @@ void MyDemo::create_shader_table () {
 
     shader_table_->Unmap(0, nullptr);
 }
+
+// ==============================================================================================================
+
 void MyDemo::create_shader_resources () {
     // -- create output resource, with the dimensions and format matching the swapchain
     D3D12_RESOURCE_DESC output_desc = {};
