@@ -96,8 +96,8 @@ create_rtv (
 ) {
     D3D12_RENDER_TARGET_VIEW_DESC desc = {};
     desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-    desc.Format = fmt,
-        desc.Texture2D.MipSlice = 0;
+    desc.Format = fmt;
+    desc.Texture2D.MipSlice = 0;
 
     D3D12_CPU_DESCRIPTOR_HANDLE hcpu_rtv = heap->GetCPUDescriptorHandleForHeapStart();
     hcpu_rtv.ptr += heap_used_entries * dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -309,7 +309,7 @@ create_top_level_as (
     inst_desc->InstanceID = 0; // this value is exposed to shader via InstanceID()
     inst_desc->InstanceContributionToHitGroupIndex = 0; // this is offset inside shader table
     inst_desc->Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
-    mat4 mat; // identity matrix
+    mat4 mat(1.0f); // identity matrix
     memcpy(inst_desc->Transform, &mat, sizeof(inst_desc->Transform));
     inst_desc->AccelerationStructure = bottom_level_as->GetGPUVirtualAddress();
     inst_desc->InstanceMask = 0xff;
@@ -591,7 +591,7 @@ void MyDemo::init_dxr (HWND hwnd, uint32_t w, uint32_t h) {
     rtv_heap_.heap_ = create_descriptor_heap(dev_, RtvHeapSize, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, false);
 
     // -- create [per] frame objects:
-    for (uint32_t i = 0; i < DefaultSwapchainBufferCount; ++i) {
+    for (uint32_t i = 0; i < _countof(FrameObjects_); ++i) {
         D3D_CALL(dev_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&FrameObjects_[i].cmdalloc_)));
         D3D_CALL(swapchain_->GetBuffer(i, IID_PPV_ARGS(&FrameObjects_[i].swapchain_buffer_)));
         FrameObjects_[i].hcpu_rtv_ = create_rtv(
@@ -610,7 +610,7 @@ void MyDemo::init_dxr (HWND hwnd, uint32_t w, uint32_t h) {
     fence_event_  = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 }
 uint32_t MyDemo::begin_frame () {
-    ID3D12DescriptorHeap * heaps[] = {srv_uav_heap_};
+    ID3D12DescriptorHeap * heaps [] = {srv_uav_heap_};
     cmdlist_->SetDescriptorHeaps(_countof(heaps), heaps);
     return swapchain_->GetCurrentBackBufferIndex();
 }
@@ -855,7 +855,7 @@ void MyDemo::OnFrameRender () {
     desc.HitGroupTable.StrideInBytes = shader_table_entry_size_;
     desc.HitGroupTable.SizeInBytes = shader_table_entry_size_;
 
-    // -- bind the empty root sig:
+    // -- bind the empty root sig (because we're not using a global root signature):
     cmdlist_->SetComputeRootSignature(empty_root_sig_);
 
     // -- dispatch call:
@@ -871,8 +871,8 @@ void MyDemo::OnFrameRender () {
     resource_barrier(cmdlist_, FrameObjects_[rtv_idx].swapchain_buffer_,
         D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
     cmdlist_->ClearRenderTargetView(FrameObjects_[rtv_idx].hcpu_rtv_, clear_color, 0, nullptr);*/
-    
-    
+
+
     end_frame(rtv_idx);
 }
 void MyDemo::OnShutdown () {
