@@ -56,8 +56,8 @@ void miss (inout RayPayload payload) {
 void chs (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs) {
     float3 barycentrics = float3(
         1.0 - attribs.barycentrics.x - attribs.barycentrics.y,
-        barycentrics.x,
-        barycentrics.y
+        attribs.barycentrics.x,
+        attribs.barycentrics.y
     );
 
     float3 A = float3(1, 0, 0);
