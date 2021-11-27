@@ -59,6 +59,7 @@ struct Framework {
         Demo & demo,
         std::string const & wndtitle,
         uint32_t w = 1280, uint32_t h = 720
+        //uint32_t w = 1920, uint32_t h = 1200 // higher resolution increases the triangles quality
     );
 };
 

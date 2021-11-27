@@ -23,7 +23,7 @@ void raygen () {
     float2 dims = float2(launch_dim.xy);
 
     // -- normalize and shift/scale (from [0,1] to [-1,1]):
-    float2 normalized_coord = ((coords/dims) * 2.0f - 1.0f);
+    float2 normalized_coord = ((coords / dims) * 2.0f - 1.0f);
     
     float aspect_ratio = dims.x / dims.y;
 
@@ -63,5 +63,19 @@ void chs (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes att
     float3 A = float3(1, 0, 0);
     float3 B = float3(0, 1, 0);
     float3 C = float3(0, 0, 1);
-    payload.color = A * barycentrics.x + B * barycentrics.y + C * barycentrics.z;
+
+    uint instance_id = InstanceID();
+    switch (instance_id) {
+    case 0:
+        payload.color = A * barycentrics.x + B * barycentrics.y + C * barycentrics.z;
+        break;
+    case 1:
+        payload.color = B * barycentrics.x + C * barycentrics.y + A * barycentrics.z;
+        break;
+    case 2:
+        payload.color = C * barycentrics.x + A * barycentrics.y + B * barycentrics.z;
+        break;
+    }
+
+
 }

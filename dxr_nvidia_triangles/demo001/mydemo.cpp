@@ -266,7 +266,7 @@ create_top_level_as (
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
     inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
     inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
-    inputs.NumDescs = 1;
+    inputs.NumDescs = 3; // three triangles
     inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
 
     // -- get size of TLAS buffers:
@@ -297,7 +297,7 @@ create_top_level_as (
     // -- create and map the corresponding buffer:
     buffers.InstanceDesc = create_buffer(
         dev,
-        sizeof(D3D12_RAYTRACING_INSTANCE_DESC),
+        sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * 3, // three triangles
         D3D12_RESOURCE_FLAG_NONE,
         D3D12_RESOURCE_STATE_GENERIC_READ,
         UploadHeapProps
@@ -305,15 +305,22 @@ create_top_level_as (
     D3D12_RAYTRACING_INSTANCE_DESC * inst_desc = nullptr;
     buffers.InstanceDesc->Map(0, nullptr, (void **)&inst_desc);
 
-    // -- initialize the InstanceDesc (we only have one instance)
-    inst_desc->InstanceID = 0; // this value is exposed to shader via InstanceID()
-    inst_desc->InstanceContributionToHitGroupIndex = 0; // this is offset inside shader table
-    inst_desc->Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
-    mat4 mat(1.0f); // identity matrix
-    memcpy(inst_desc->Transform, &mat, sizeof(inst_desc->Transform));
-    inst_desc->AccelerationStructure = bottom_level_as->GetGPUVirtualAddress();
-    inst_desc->InstanceMask = 0xff;
+    // -- initialize the InstanceDesc (three triangles)
+    ZeroMemory(inst_desc, sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * 3);
 
+    mat4 transforms[3];
+    transforms[0] = mat4(1.0f);
+    transforms[1] = translate(mat4(1.0f), vec3(-2, 0, 0));
+    transforms[2] = translate(mat4(1.0f), vec3(2, 0, 0));
+    for (uint32_t i = 0; i < 3; ++i) {
+        inst_desc[i].InstanceID = i; // this value is exposed to shader via InstanceID()
+        inst_desc[i].InstanceContributionToHitGroupIndex = 0; // this is offset inside shader table
+        inst_desc[i].Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+        mat4 mat = transpose(transforms[i]); // glm is column major, DXR expects row major transforms
+        memcpy(inst_desc[i].Transform, &mat, sizeof(inst_desc[i].Transform));
+        inst_desc[i].AccelerationStructure = bottom_level_as->GetGPUVirtualAddress();
+        inst_desc[i].InstanceMask = 0xff;
+    }
     // -- unmap when done:
     buffers.InstanceDesc->Unmap(0, nullptr);
 
