@@ -43,6 +43,8 @@ private:
     ID3D12DescriptorHeapPtr srv_uav_heap_;
     static uint32_t const srv_uav_heap_size_ = 2;
 
+    ID3D12ResourcePtr cbuffer_;
+
     void init_dxr (HWND hwnd, uint32_t w, uint32_t h);
     uint32_t begin_frame ();
     void end_frame (uint32_t rtv_idx);
@@ -50,6 +52,7 @@ private:
     void create_rtpso (); // create RTPSO which is completely different than graphics and compute PSOs
     void create_shader_table ();
     void create_shader_resources ();
+    void create_cbuffer ();
 
 public:
     void OnLoad (HWND hwnd, uint32_t w, uint32_t h) override;

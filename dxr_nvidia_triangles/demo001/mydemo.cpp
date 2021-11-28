@@ -447,7 +447,20 @@ create_raygen_root_sig_desc () {
 
     return ret;
 }
+static RootSigDesc
+create_hit_root_sig_desc () {
+    RootSigDesc ret = {};
+    ret.root_params.resize(1);
+    ret.root_params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    ret.root_params[0].Descriptor.RegisterSpace = 0;
+    ret.root_params[0].Descriptor.ShaderRegister = 0;
 
+    ret.desc.NumParameters = 1;
+    ret.desc.pParameters = ret.root_params.data();
+    ret.desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+    return ret;
+}
 struct DxilLibrary {
     D3D12_DXIL_LIBRARY_DESC DxilLibDesc = {};
     D3D12_STATE_SUBOBJECT StateSubobj = {};
@@ -670,12 +683,13 @@ void MyDemo::create_rtpso () {
         1 for DXIL Library
         1 for Hit Group
         2 for RayGen Root-Signature and the Subobject Association
-        2 for Root-Signature shared between Miss and Hit shaders (signature and association)
+        2 for Hit-Program Root-Signature and the Subobject Association
+        2 for MIss-Shader Root-Signature and its association
         2 for Shader Config (shared between all programs). 1 for the config, 1 for the association
         1 for Pipeline Config
         1 for Global Root-Signature
     */
-    std::array<D3D12_STATE_SUBOBJECT, 10> subobjs;
+    std::array<D3D12_STATE_SUBOBJECT, 12> subobjs;
     uint32_t index = 0;
 
     // -- creaet the dxil lib:
@@ -692,38 +706,43 @@ void MyDemo::create_rtpso () {
     ExportAssociation raygen_root_association(&RayGenShader, 1, &(subobjs[raygen_root_sig_index]));
     subobjs[index++] = raygen_root_association.Subobject; // 3 associate root sig to raygen shader
 
-    // -- create the miss- and hit-programs root-sig and association (4,5):
+    // -- create hit-programs root-sig and association (4,5):
+    LocalRootSig hit_root_sig(dev_, create_hit_root_sig_desc().desc);
+    subobjs[index] = hit_root_sig.Subobject; // 4 hit root sig
+    uint32_t hit_root_index = index++; // 4
+    ExportAssociation hit_root_assocation(&ClosestHitShader, 1, &(subobjs[hit_root_index]));
+    subobjs[index++] = hit_root_assocation.Subobject; // 5 associate hit root sig to hit-group
+
+    // -- create the miss root-sig and association (6,7):
     D3D12_ROOT_SIGNATURE_DESC empty_desc = {};
     empty_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
-    LocalRootSig hit_miss_root_sig(dev_, empty_desc);
-    subobjs[index] = hit_miss_root_sig.Subobject; // 4 root sig to be shared between Miss and CHS
-    uint32_t hit_miss_root_index = index++; // 4
-    WCHAR const * miss_hit_export_names [] = {MissShader, ClosestHitShader};
-    ExportAssociation miss_hit_root_association(
-        miss_hit_export_names, _countof(miss_hit_export_names), &subobjs[hit_miss_root_index]);
-    subobjs[index++] = miss_hit_root_association.Subobject; // 5 Associate Root Sig to Miss and CHS
+    LocalRootSig miss_root_sig(dev_, empty_desc);
+    subobjs[index] = miss_root_sig.Subobject; // 6 miss root sig
+    uint32_t miss_root_index = index++; // 6
+    ExportAssociation miss_root_association(&MissShader, 1, &subobjs[miss_root_index]);
+    subobjs[index++] = miss_root_association.Subobject; // 7 Associate Root Sig to Miss shader
 
-    // -- bind payload size to the programs (6,7):
+    // -- bind payload size to the programs (8,9):
     ShaderConfig shader_cfg(sizeof(float) * 2, sizeof(float) * 3);
-    subobjs[index] = shader_cfg.Subobject; // 6 shader cfg
-    uint32_t shader_cfg_index = index++; // 6
+    subobjs[index] = shader_cfg.Subobject; // 8 shader cfg
+    uint32_t shader_cfg_index = index++; // 8
     WCHAR const * shader_exports [] = {MissShader, ClosestHitShader, RayGenShader};
     ExportAssociation cfg_association(shader_exports, _countof(shader_exports), &(subobjs[shader_cfg_index]));
-    subobjs[index++] = cfg_association.Subobject; // 7 associate shader config to Miss, CHS, raygen
+    subobjs[index++] = cfg_association.Subobject; // 9 associate shader config to Miss, CHS, raygen
 
     // -- create pipeline cfg
     //PipelineConfig cfg(0); // N.B., zero maxTraceRecursionDepth assumes TracyRay intrinsic is not called at all
     PipelineConfig cfg(1); // at least maxTraceRecursionDepth 1 for raytracing
-    subobjs[index++] = cfg.Subobj; // 8
+    subobjs[index++] = cfg.Subobj; // 10
 
     // -- create global root sig and store the empty signature
     GlobalRootSig root_sig(dev_, {});
     empty_root_sig_ = root_sig.RootSig;
-    subobjs[index++] = root_sig.Subobject; // 9
+    subobjs[index++] = root_sig.Subobject; // 11
 
     // -- create RTPSO:
     D3D12_STATE_OBJECT_DESC desc = {};
-    desc.NumSubobjects = index; // 10
+    desc.NumSubobjects = index; // 12
     desc.pSubobjects = subobjs.data();
     desc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
     D3D_CALL(dev_->CreateStateObject(&desc, IID_PPV_ARGS(&rtpso_)));
@@ -775,7 +794,11 @@ void MyDemo::create_shader_table () {
     memcpy(data + shader_table_entry_size_, rtpso_props->GetShaderIdentifier(MissShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
 
     // -- Entry 2: hit program:
-    memcpy(data + 2 * shader_table_entry_size_, rtpso_props->GetShaderIdentifier(HitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    uint8_t * hit_entry = data + shader_table_entry_size_ * 2; // +2 skips the raygen and miss entries
+    memcpy(hit_entry, rtpso_props->GetShaderIdentifier(HitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    uint8_t * cb_desc = hit_entry + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // adding ShaderId size gets us to the location of the cbuffer entry
+    assert(0 == ((uint64_t)cb_desc % 8)); // root descriptor must be stored at an 8-byte aligned address
+    *(D3D12_GPU_VIRTUAL_ADDRESS *)cb_desc = cbuffer_->GetGPUVirtualAddress();
 
     shader_table_->Unmap(0, nullptr);
 }
@@ -829,11 +852,41 @@ void MyDemo::create_shader_resources () {
 
 // ==============================================================================================================
 
+void MyDemo::create_cbuffer () {
+    // -- the shader code declares the cbuffer with 9 float3, but
+    // -- due to HLSL packing rules, we create the cbuffer with 9 float4
+    // NOTE(omid): each float3 needs to start on a 16-byte boundary
+    vec4 buffer_data [] = {
+        // A
+        vec4(1.0f, 0.0f, 0.0f, 1.0f),
+        vec4(0.0f, 1.0f, 0.0f, 1.0f),
+        vec4(0.0f, 0.0f, 1.0f, 1.0f),
+
+        // B
+        vec4(1.0f, 1.0f, 0.0f, 1.0f),
+        vec4(0.0f, 1.0f, 1.0f, 1.0f),
+        vec4(1.0f, 0.0f, 1.0f, 1.0f),
+
+        // C
+        vec4(1.0f, 0.0f, 1.0f, 1.0f),
+        vec4(1.0f, 1.0f, 0.0f, 1.0f),
+        vec4(0.0f, 1.0f, 1.0f, 1.0f)
+    };
+    cbuffer_ = create_buffer(dev_, sizeof(buffer_data), D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
+    uint8_t * data = nullptr;
+    D3D_CALL(cbuffer_->Map(0, nullptr, (void **)&data));
+    memcpy(data, buffer_data, sizeof(buffer_data));
+    cbuffer_->Unmap(0, nullptr);
+}
+
+// ==============================================================================================================
+
 void MyDemo::OnLoad (HWND hwnd, uint32_t w, uint32_t h) {
     init_dxr(hwnd, w, h);
     create_acceleration_structure();
     create_rtpso();
     create_shader_resources();
+    create_cbuffer();
     create_shader_table();
 }
 void MyDemo::OnFrameRender () {
