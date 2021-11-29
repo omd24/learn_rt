@@ -314,7 +314,9 @@ create_top_level_as (
     transforms[2] = translate(mat4(1.0f), vec3(2, 0, 0));
     for (uint32_t i = 0; i < 3; ++i) {
         inst_desc[i].InstanceID = i; // this value is exposed to shader via InstanceID()
-        inst_desc[i].InstanceContributionToHitGroupIndex = 0; // this is offset inside shader table
+         // -- InstanceContributionToHitGroupIndex is offset inside shader table,
+         // -- it's needed bc we use different cbuffer per instance:
+        inst_desc[i].InstanceContributionToHitGroupIndex = i;
         inst_desc[i].Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
         mat4 mat = transpose(transforms[i]); // glm is column major, DXR expects row major transforms
         memcpy(inst_desc[i].Transform, &mat, sizeof(inst_desc[i].Transform));
@@ -756,7 +758,9 @@ void MyDemo::create_shader_table () {
         Shader table layout:
         Entry 0 - raygen program
         Entry 1 - Miss program
-        Entry 2 - Hit program
+        Entry 2 - Hit program for triangle 0 and plane
+        Entry 3 - Hit program for triangle 1
+        Entry 4 - Hit program for triangle 2
 
         Note 1:
         All entries in the shader-table must have the same size,
@@ -771,7 +775,7 @@ void MyDemo::create_shader_table () {
     shader_table_entry_size_ = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
     shader_table_entry_size_ += 8; // raygen descriptor table
     shader_table_entry_size_ = ALIGN_TO(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT, shader_table_entry_size_);
-    uint32_t total_entry_size = 3 * shader_table_entry_size_;
+    uint32_t total_entry_size = 5 * shader_table_entry_size_;
 
     // -- for simplicity we create the shader-table on upload heap but you would create it on default heap
     shader_table_ = create_buffer(dev_,
@@ -793,12 +797,14 @@ void MyDemo::create_shader_table () {
     // -- Entry 1: miss program:
     memcpy(data + shader_table_entry_size_, rtpso_props->GetShaderIdentifier(MissShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
 
-    // -- Entry 2: hit program:
-    uint8_t * hit_entry = data + shader_table_entry_size_ * 2; // +2 skips the raygen and miss entries
-    memcpy(hit_entry, rtpso_props->GetShaderIdentifier(HitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-    uint8_t * cb_desc = hit_entry + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // adding ShaderId size gets us to the location of the cbuffer entry
-    assert(0 == ((uint64_t)cb_desc % 8)); // root descriptor must be stored at an 8-byte aligned address
-    *(D3D12_GPU_VIRTUAL_ADDRESS *)cb_desc = cbuffer_->GetGPUVirtualAddress();
+    // -- Entry 2-4: the triangles' hit program: ShaderId and Cbuffer Data:
+    for (uint32_t i = 0; i < 3; ++i) {
+        uint8_t * hit_entry = data + shader_table_entry_size_ * (i + 2); // +2 skips the raygen and miss entries
+        memcpy(hit_entry, rtpso_props->GetShaderIdentifier(HitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+        uint8_t * cb_desc = hit_entry + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // adding ShaderId size gets us to the location of the cbuffer entry
+        assert(0 == ((uint64_t)cb_desc % 8)); // root descriptor must be stored at an 8-byte aligned address
+        *(D3D12_GPU_VIRTUAL_ADDRESS *)cb_desc = cbuffers_[i]->GetGPUVirtualAddress();
+    }
 
     shader_table_->Unmap(0, nullptr);
 }
@@ -852,31 +858,40 @@ void MyDemo::create_shader_resources () {
 
 // ==============================================================================================================
 
-void MyDemo::create_cbuffer () {
-    // -- the shader code declares the cbuffer with 9 float3, but
-    // -- due to HLSL packing rules, we create the cbuffer with 9 float4
+void MyDemo::create_cbuffers () {
+    // -- the shader code declares each cbuffer with 3 float3, but
+    // -- due to HLSL packing rules, we create each cbuffer with 3 float4
     // NOTE(omid): each float3 needs to start on a 16-byte boundary
     vec4 buffer_data [] = {
-        // A
+        // Instance 0
         vec4(1.0f, 0.0f, 0.0f, 1.0f),
+        vec4(1.0f, 1.0f, 0.0f, 1.0f),
+        vec4(1.0f, 0.0f, 1.0f, 1.0f),
+
+        // Instance B
         vec4(0.0f, 1.0f, 0.0f, 1.0f),
-        vec4(0.0f, 0.0f, 1.0f, 1.0f),
-
-        // B
-        vec4(1.0f, 1.0f, 0.0f, 1.0f),
         vec4(0.0f, 1.0f, 1.0f, 1.0f),
-        vec4(1.0f, 0.0f, 1.0f, 1.0f),
-
-        // C
-        vec4(1.0f, 0.0f, 1.0f, 1.0f),
         vec4(1.0f, 1.0f, 0.0f, 1.0f),
+
+        // Instance C
+        vec4(0.0f, 0.0f, 1.0f, 1.0f),
+        vec4(1.0f, 0.0f, 1.0f, 1.0f),
         vec4(0.0f, 1.0f, 1.0f, 1.0f)
     };
-    cbuffer_ = create_buffer(dev_, sizeof(buffer_data), D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
-    uint8_t * data = nullptr;
-    D3D_CALL(cbuffer_->Map(0, nullptr, (void **)&data));
-    memcpy(data, buffer_data, sizeof(buffer_data));
-    cbuffer_->Unmap(0, nullptr);
+    for (uint32_t i = 0; i < 3; ++i) {
+        uint32_t const buffer_size = sizeof(vec4) * 3;
+        cbuffers_[i] = create_buffer(
+            dev_,
+            sizeof(buffer_data),
+            D3D12_RESOURCE_FLAG_NONE,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            UploadHeapProps
+        );
+        uint8_t * data = nullptr;
+        D3D_CALL(cbuffers_[i]->Map(0, nullptr, (void **)&data));
+        memcpy(data, &buffer_data[i * 3], sizeof(buffer_data));
+        cbuffers_[i]->Unmap(0, nullptr);
+    }
 }
 
 // ==============================================================================================================
@@ -886,7 +901,7 @@ void MyDemo::OnLoad (HWND hwnd, uint32_t w, uint32_t h) {
     create_acceleration_structure();
     create_rtpso();
     create_shader_resources();
-    create_cbuffer();
+    create_cbuffers();
     create_shader_table();
 }
 void MyDemo::OnFrameRender () {
@@ -913,7 +928,7 @@ void MyDemo::OnFrameRender () {
     size_t hit_offset = 2 * shader_table_entry_size_;
     desc.HitGroupTable.StartAddress = shader_table_->GetGPUVirtualAddress() + hit_offset;
     desc.HitGroupTable.StrideInBytes = shader_table_entry_size_;
-    desc.HitGroupTable.SizeInBytes = shader_table_entry_size_;
+    desc.HitGroupTable.SizeInBytes = 3 * shader_table_entry_size_; // hit group contains 3 entries
 
     // -- bind the empty root sig (because we're not using a global root signature):
     cmdlist_->SetComputeRootSignature(empty_root_sig_);

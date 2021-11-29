@@ -2,9 +2,9 @@ RaytracingAccelerationStructure g_raytracing_scene : register(t0);
 RWTexture2D<float4> g_output : register(u0);
 
 cbuffer PerFrame : register(b0) {
-    float3 A[3];
-    float3 B[3];
-    float3 C[3];
+    float3 A;
+    float3 B;
+    float3 C;
 }
 
 float3 linear_to_srgb (float3 c) {
@@ -67,9 +67,22 @@ void chs (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes att
     );
 
     uint instance_id = InstanceID();
+    payload.color = A * barycentrics.x + B * barycentrics.y + C * barycentrics.z;
+}
+/*
+[shader("closesthit")]
+void chs_old (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs) {
+    float3 barycentrics = float3(
+        1.0 - attribs.barycentrics.x - attribs.barycentrics.y,
+        attribs.barycentrics.x,
+        attribs.barycentrics.y
+    );
+
+    uint instance_id = InstanceID();
     payload.color =
         A[instance_id] * barycentrics.x +
         B[instance_id] * barycentrics.y +
         C[instance_id] * barycentrics.z;
         
 }
+*/
