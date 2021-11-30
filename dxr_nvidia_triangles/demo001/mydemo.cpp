@@ -192,6 +192,27 @@ create_triangle_vb (ID3D12Device5Ptr dev) {
     buffer->Unmap(0, nullptr);
     return buffer;
 }
+static ID3D12ResourcePtr
+create_plane_vb (ID3D12Device5Ptr dev) {
+    vec3 const vertices [] = {
+        vec3(-100, -1, -2),
+        vec3(100, -1, 100),
+        vec3(-100, -1, 100),
+
+        vec3(-100, -1, -2),
+        vec3(100, -1, -2),
+        vec3(100, -1, 100)
+    };
+    // -- for simplicity, we create vb on an upload heap but in practice a default heap is recommended
+    // -- though an upload buffer would be needed for updating data to the vb
+    ID3D12ResourcePtr buffer = create_buffer(dev, sizeof(vertices), D3D12_RESOURCE_FLAG_NONE,
+        D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
+    uint8_t * data;
+    buffer->Map(0, nullptr, (void **)&data);
+    memcpy(data, vertices, sizeof(vertices));
+    buffer->Unmap(0, nullptr);
+    return buffer;
+}
 struct AccelerationStructureBuffers {
     ID3D12ResourcePtr Scratch;
     ID3D12ResourcePtr Result;
@@ -201,21 +222,27 @@ static AccelerationStructureBuffers
 create_bottom_level_as (
     ID3D12Device5Ptr dev,
     ID3D12GraphicsCommandList4Ptr cmdlist,
-    ID3D12ResourcePtr vb
+    ID3D12ResourcePtr vb [], // each geometry has exactly one VB
+    uint32_t vertex_count [],
+    uint32_t geometry_count
 ) {
-    D3D12_RAYTRACING_GEOMETRY_DESC geom_desc = {};
-    geom_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-    geom_desc.Triangles.VertexBuffer.StartAddress = vb->GetGPUVirtualAddress();
-    geom_desc.Triangles.VertexBuffer.StrideInBytes = sizeof(vec3);
-    geom_desc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-    geom_desc.Triangles.VertexCount = 3;
-    geom_desc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> geom_descs;
+    geom_descs.resize(geometry_count);
+
+    for (uint32_t i = 0; i < geometry_count; ++i) {
+        geom_descs[i].Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+        geom_descs[i].Triangles.VertexBuffer.StartAddress = vb[i]->GetGPUVirtualAddress();
+        geom_descs[i].Triangles.VertexBuffer.StrideInBytes = sizeof(vec3);
+        geom_descs[i].Triangles.VertexCount = vertex_count[i];
+        geom_descs[i].Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+        geom_descs[i].Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+    }
 
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
     inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
     inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
-    inputs.NumDescs = 1;
-    inputs.pGeometryDescs = &geom_desc;
+    inputs.NumDescs = geometry_count;
+    inputs.pGeometryDescs = geom_descs.data();
     inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
 
     // -- get the required info (e.g., size) for scratch and AS buffers:
@@ -229,7 +256,7 @@ create_bottom_level_as (
         dev,
         info.ScratchDataSizeInBytes,
         D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_COMMON,
         DefaultHeapProps
     );
     buffers.Result = create_buffer(
@@ -260,7 +287,7 @@ static AccelerationStructureBuffers
 create_top_level_as (
     ID3D12Device5Ptr dev,
     ID3D12GraphicsCommandList4Ptr cmdlist,
-    ID3D12ResourcePtr bottom_level_as,
+    ID3D12ResourcePtr bottom_level_as[2], // a single trinagle, a trinagle plus a plane
     uint64_t & tlas_size
 ) {
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
@@ -297,7 +324,7 @@ create_top_level_as (
     // -- create and map the corresponding buffer:
     buffers.InstanceDesc = create_buffer(
         dev,
-        sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * 3, // three triangles
+        sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * 3, // three instances
         D3D12_RESOURCE_FLAG_NONE,
         D3D12_RESOURCE_STATE_GENERIC_READ,
         UploadHeapProps
@@ -305,14 +332,24 @@ create_top_level_as (
     D3D12_RAYTRACING_INSTANCE_DESC * inst_desc = nullptr;
     buffers.InstanceDesc->Map(0, nullptr, (void **)&inst_desc);
 
-    // -- initialize the InstanceDesc (three triangles)
+    // -- initialize the InstanceDesc (three instances)
     ZeroMemory(inst_desc, sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * 3);
 
     mat4 transforms[3];
     transforms[0] = mat4(1.0f);
     transforms[1] = translate(mat4(1.0f), vec3(-2, 0, 0));
     transforms[2] = translate(mat4(1.0f), vec3(2, 0, 0));
-    for (uint32_t i = 0; i < 3; ++i) {
+
+    // -- first instance desc describes "triangle plus plane" instance:
+    inst_desc[0].InstanceID = 0;
+    inst_desc[0].InstanceContributionToHitGroupIndex = 0;
+    inst_desc[0].Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+    memcpy(inst_desc[0].Transform, &transforms[0], sizeof(inst_desc[0].Transform));
+    inst_desc[0].AccelerationStructure = bottom_level_as[0]->GetGPUVirtualAddress();
+    inst_desc[0].InstanceMask = 0xff;
+
+    // -- second and third instances each describe just a triangle
+    for (uint32_t i = 1; i < 3; ++i) {
         inst_desc[i].InstanceID = i; // this value is exposed to shader via InstanceID()
          // -- InstanceContributionToHitGroupIndex is offset inside shader table,
          // -- it's needed bc we use different cbuffer per instance:
@@ -320,7 +357,7 @@ create_top_level_as (
         inst_desc[i].Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
         mat4 mat = transpose(transforms[i]); // glm is column major, DXR expects row major transforms
         memcpy(inst_desc[i].Transform, &mat, sizeof(inst_desc[i].Transform));
-        inst_desc[i].AccelerationStructure = bottom_level_as->GetGPUVirtualAddress();
+        inst_desc[i].AccelerationStructure = bottom_level_as[1]->GetGPUVirtualAddress();
         inst_desc[i].InstanceMask = 0xff;
     }
     // -- unmap when done:
@@ -657,11 +694,21 @@ void MyDemo::end_frame (uint32_t rtv_idx) {
 // ==============================================================================================================
 
 void MyDemo::create_acceleration_structure () {
-    vertex_buffer_ = create_triangle_vb(dev_);
-    AccelerationStructureBuffers bottom_level_buffers =
-        create_bottom_level_as(dev_, cmdlist_, vertex_buffer_);
-    AccelerationStructureBuffers top_level_buffers =
-        create_top_level_as(dev_, cmdlist_, bottom_level_buffers.Result, tlas_size_);
+    vertex_buffers_[0] = create_triangle_vb(dev_);
+    vertex_buffers_[1] = create_plane_vb(dev_);
+    AccelerationStructureBuffers bottom_level_buffers[2];
+
+    // -- first BLAS is for a triangle plus a plane:
+    uint32_t vertex_count[] = {3, 6};
+    bottom_level_buffers[0] = create_bottom_level_as(dev_, cmdlist_, vertex_buffers_, vertex_count, 2);
+    bottom_level_as_[0] = bottom_level_buffers[0].Result;
+
+    // -- second BLAS is for just a single triangle:
+    bottom_level_buffers[1] = create_bottom_level_as(dev_, cmdlist_, vertex_buffers_, vertex_count, 1);
+    bottom_level_as_[1] = bottom_level_buffers[1].Result;
+
+    // -- create the TLAS:
+    AccelerationStructureBuffers top_level_buffers = create_top_level_as(dev_, cmdlist_, bottom_level_as_, tlas_size_);
 
     // -- we don't have any resource lifetime management so we flush and sync here
     // -- if we had resource lifetime mgmt we could submit list whenever we like
@@ -673,7 +720,6 @@ void MyDemo::create_acceleration_structure () {
 
     // -- store the AS final (aka result) buffers. The rest of the buffers will be released once we exit the function
     top_level_as_ = top_level_buffers.Result;
-    bottom_level_as_ = bottom_level_buffers.Result;
 }
 
 // ==============================================================================================================

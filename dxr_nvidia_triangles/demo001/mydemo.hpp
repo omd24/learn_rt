@@ -15,9 +15,9 @@ private:
 
     HWND hwnd_ = nullptr;
 
-    ID3D12ResourcePtr vertex_buffer_;
+    ID3D12ResourcePtr vertex_buffers_[2]; // 2 geometries, aka 2 meshes (triangle, plane)
     ID3D12ResourcePtr top_level_as_;
-    ID3D12ResourcePtr bottom_level_as_;
+    ID3D12ResourcePtr bottom_level_as_[2]; // 2 collections of geometries (a single triangle, both a triangle and a plane)
     uint64_t tlas_size_ = 0;
 
     struct {
