@@ -46,7 +46,8 @@ void raygen () {
     RayPayload payload;
     TraceRay(
         g_raytracing_scene,
-        0 /*ray flags*/, 0xFF /* no object culling */, 0 /*ray index*/, 0, 0,
+        0 /*ray flags*/, 0xFF /* no object culling */, 0 /*ray index*/,
+        1 /* MultiplierForGeometryContributionToShaderIndex */, 0,
         ray, payload
     );
 
@@ -59,7 +60,7 @@ void miss (inout RayPayload payload) {
     payload.color = float3(0.4, 0.6, 0.2);
 }
 [shader("closesthit")]
-void chs (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs) {
+void chs_triangle (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs) {
     float3 barycentrics = float3(
         1.0 - attribs.barycentrics.x - attribs.barycentrics.y,
         attribs.barycentrics.x,
@@ -86,3 +87,7 @@ void chs_old (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes
         
 }
 */
+[shader("closesthit")]
+void chs_plane (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs) {
+    payload.color = 0.9f;
+}
