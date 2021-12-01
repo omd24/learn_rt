@@ -354,7 +354,7 @@ create_top_level_as (
          // -- InstanceContributionToHitGroupIndex is offset inside shader table,
          // -- it's needed bc we use different cbuffer per instance:
          // -- +1 because the plane takes an additional entry in the shader table (refer to the docx file)
-        inst_desc[i].InstanceContributionToHitGroupIndex = i + 1;
+        inst_desc[i].InstanceContributionToHitGroupIndex = (i + 2) * 2;
         inst_desc[i].Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
         mat4 mat = transpose(transforms[i]); // glm is column major, DXR expects row major transforms
         memcpy(inst_desc[i].Transform, &mat, sizeof(inst_desc[i].Transform));
@@ -501,6 +501,28 @@ create_triangle_hit_root_sig_desc () {
 
     return ret;
 }
+static RootSigDesc
+create_plane_hit_root_sig_desc () {
+    RootSigDesc ret = {};
+
+    ret.ranges.resize(1);
+    ret.ranges[0].BaseShaderRegister = 0;
+    ret.ranges[0].NumDescriptors = 1; // 1 SRV to bind TLAS to shader
+    ret.ranges[0].RegisterSpace = 0;
+    ret.ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    ret.ranges[0].OffsetInDescriptorsFromTableStart = 0;
+
+    ret.root_params.resize(1);
+    ret.root_params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    ret.root_params[0].DescriptorTable.NumDescriptorRanges = 1;
+    ret.root_params[0].DescriptorTable.pDescriptorRanges = ret.ranges.data();
+
+    ret.desc.NumParameters = 1;
+    ret.desc.pParameters = ret.root_params.data();
+    ret.desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+    return ret;
+}
 struct DxilLibrary {
     D3D12_DXIL_LIBRARY_DESC DxilLibDesc = {};
     D3D12_STATE_SUBOBJECT StateSubobj = {};
@@ -537,15 +559,18 @@ struct DxilLibrary {
 static WCHAR const * RayGenShader = L"raygen";
 static WCHAR const * MissShader = L"miss";
 static WCHAR const * TriangleChs = L"chs_triangle";
-static WCHAR const * TriangleHitGroup = L"hitgroup_triangle";
 static WCHAR const * PlaneChs = L"chs_plane";
+static WCHAR const * TriangleHitGroup = L"hitgroup_triangle";
 static WCHAR const * PlaneHitGroup = L"hitgroup_plane";
+static WCHAR const * ShadowChs = L"shadow_chs";
+static WCHAR const * ShadowMiss = L"shadow_miss";
+static WCHAR const * ShadowHitGroup = L"hitgroup_shadow";
 
 static DxilLibrary
 create_dxil_library () {
     // -- compile shader:
     ID3DBlobPtr dxil_lib = compile_library(L"shaders/default.hlsl", L"lib_6_3");
-    wchar_t const * entry_points [] = {RayGenShader, MissShader, PlaneChs, TriangleChs};
+    wchar_t const * entry_points [] = {RayGenShader, MissShader, PlaneChs, TriangleChs, ShadowMiss, ShadowChs};
     return DxilLibrary(dxil_lib, entry_points, _countof(entry_points));
 }
 
@@ -730,17 +755,18 @@ void MyDemo::create_acceleration_structure () {
 void MyDemo::create_rtpso () {
     // NOTE(omid):
     /*
-        we need 10 subobjects:
+        we need 16 subobjects:
         1 for DXIL Library
-        2 for Hit Groups (trinagle hitgroup and plane hitgroup)
+        3 for Hit Groups (trinagle hitgroup, plane hitgroup, and shadow hitgroup)
         2 for RayGen Root-Signature and the Subobject Association
         2 for Triangle Hit-Program Root-Signature and the Subobject Association
         2 for Plane Hit-Program and Miss-Shader Root-Signature and the Subobject Association
+        2 for Shadow-Program and Miss-Shader Root-Signature and the Subobject Association
         2 for Shader Config (shared between all programs). 1 for the config, 1 for the association
         1 for Pipeline Config
         1 for Global Root-Signature
     */
-    std::array<D3D12_STATE_SUBOBJECT, 13> subobjs;
+    std::array<D3D12_STATE_SUBOBJECT, 16> subobjs;
     uint32_t index = 0;
 
     // -- creaet the dxil lib:
@@ -753,51 +779,67 @@ void MyDemo::create_rtpso () {
     HitProgram plane_hit_prog(nullptr, PlaneChs, PlaneHitGroup);
     subobjs[index++] = plane_hit_prog.Subobject; // 2 Plane Hit Group
 
-    // -- create the raygen root-sig and association (3,4):
+    HitProgram shadow_hit_prog(nullptr, ShadowChs, ShadowHitGroup);
+    subobjs[index++] = shadow_hit_prog.Subobject; // 3 Shadow Hit Group
+
+    // -- create the raygen root-sig and association (4,5):
     LocalRootSig raygen_root_sig(dev_, create_raygen_root_sig_desc().desc);
-    subobjs[index] = raygen_root_sig.Subobject; // 3 raygen root sig
-    uint32_t raygen_root_sig_index  = index++; // 3
+    subobjs[index] = raygen_root_sig.Subobject; // 4 raygen root sig
+    uint32_t raygen_root_sig_index  = index++; // 4
     ExportAssociation raygen_root_association(&RayGenShader, 1, &(subobjs[raygen_root_sig_index]));
-    subobjs[index++] = raygen_root_association.Subobject; // 4 associate root sig to raygen shader
+    subobjs[index++] = raygen_root_association.Subobject; // 5 associate root sig to raygen shader
 
-    // -- create hit-programs root-sig and association (5,6):
+    // -- create triangle hit-program root-sig and association (6,7):
     LocalRootSig tri_hit_root_sig(dev_, create_triangle_hit_root_sig_desc().desc);
-    subobjs[index] = tri_hit_root_sig.Subobject; // 5 hit root sig
-    uint32_t tri_hit_root_index = index++; // 5
+    subobjs[index] = tri_hit_root_sig.Subobject; // 6 hit root sig
+    uint32_t tri_hit_root_index = index++; // 6
     ExportAssociation tri_hit_root_assocation(&TriangleChs, 1, &(subobjs[tri_hit_root_index]));
-    subobjs[index++] = tri_hit_root_assocation.Subobject; // 6 associate hit root sig to hit-group
+    subobjs[index++] = tri_hit_root_assocation.Subobject; // 7 associate hit root sig to hit-group
 
-    // -- create the empty root-sig and associate it with plane hit-group and miss-shader (7,8):
+    // -- create plane hit-program root-sig and association (8,9):
+    LocalRootSig plane_hit_root_sig(dev_, create_plane_hit_root_sig_desc().desc);
+    subobjs[index] = plane_hit_root_sig.Subobject; // 8 hit root sig
+    uint32_t plane_hit_root_index = index++; // 8
+    ExportAssociation plane_hit_root_assocation(&PlaneHitGroup, 1, &(subobjs[plane_hit_root_index]));
+    subobjs[index++] = plane_hit_root_assocation.Subobject; // 9 associate hit root sig to hit-group
+
+    // -- create the empty root-sig and associate it with primary miss-shader and shadow-programs (10,11):
     D3D12_ROOT_SIGNATURE_DESC empty_desc = {};
     empty_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
     LocalRootSig empty_root_sig(dev_, empty_desc);
-    subobjs[index] = empty_root_sig.Subobject; // 7 empty root sig for miss-shader and plane hit-group
-    uint32_t empty_root_index = index++; // 7
-    WCHAR const * empty_root_exports [] = {PlaneChs, MissShader};
+    subobjs[index] = empty_root_sig.Subobject; // 10 empty root sig for miss-shader and shadow-programs
+    uint32_t empty_root_index = index++; // 10
+    WCHAR const * empty_root_exports [] = {MissShader, ShadowChs, ShadowMiss};
     ExportAssociation empty_root_association(empty_root_exports, _countof(empty_root_exports), &subobjs[empty_root_index]);
-    subobjs[index++] = empty_root_association.Subobject; // 8 Associate Root Sig to Plane Hit-group and Miss-shader
+    subobjs[index++] = empty_root_association.Subobject; // 11 Associate Root Sig to Miss-shader and Shadow-program
 
-    // -- bind payload size to the programs (9,10):
-    ShaderConfig shader_cfg(sizeof(float) * 2, sizeof(float) * 3);
-    subobjs[index] = shader_cfg.Subobject; // 9 shader cfg
-    uint32_t shader_cfg_index = index++; // 9
-    WCHAR const * shader_exports [] = {MissShader, TriangleChs, PlaneChs, RayGenShader};
-    ExportAssociation cfg_association(shader_exports, _countof(shader_exports), &(subobjs[shader_cfg_index]));
-    subobjs[index++] = cfg_association.Subobject; // 10 associate shader config to all shaders and hit groups
+    // NOTE(omid): we're using one ShaderConfig sub-obj:
+    /*
+        although Shadow payload is a different size (4 bytes), there can only be one defined max size per State Object.
+        it is completely valid to associate your shaders to multiple ShaderConfig sub-objects if their values are the same,
+        but we will only use one here for simplicity
+    */
+    // -- bind payload size to all programs (12,13):
+    ShaderConfig primary_shader_cfg(sizeof(float) * 2, sizeof(float) * 3);
+    subobjs[index] = primary_shader_cfg.Subobject; // 12 shader cfg
+    uint32_t shader_cfg_index = index++; // 12
+    WCHAR const * primary_shader_exports [] = {RayGenShader, MissShader, TriangleChs, PlaneChs, ShadowMiss, ShadowChs};
+    ExportAssociation primary_cfg_assoc(primary_shader_exports, _countof(primary_shader_exports), &(subobjs[shader_cfg_index]));
+    subobjs[index++] = primary_cfg_assoc.Subobject; // 13 associate shader config to all shaders and hit groups
 
     // -- create pipeline cfg
     //PipelineConfig cfg(0); // N.B., zero maxTraceRecursionDepth assumes TracyRay intrinsic is not called at all
-    PipelineConfig cfg(1); // at least maxTraceRecursionDepth 1 for raytracing
-    subobjs[index++] = cfg.Subobj; // 11
+    PipelineConfig cfg(2); // maxTraceRecursionDepth: 1 for raygen TraceRay call, 1 for "plane_chs" TraceRay call (primary hit)
+    subobjs[index++] = cfg.Subobj; // 14
 
     // -- create global root sig and store the empty signature
     GlobalRootSig root_sig(dev_, {});
     empty_root_sig_ = root_sig.RootSig;
-    subobjs[index++] = root_sig.Subobject; // 12
+    subobjs[index++] = root_sig.Subobject; // 15
 
     // -- create RTPSO:
     D3D12_STATE_OBJECT_DESC desc = {};
-    desc.NumSubobjects = index; // 13
+    desc.NumSubobjects = index; // 16
     desc.pSubobjects = subobjs.data();
     desc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
     D3D_CALL(dev_->CreateStateObject(&desc, IID_PPV_ARGS(&rtpso_)));
@@ -809,12 +851,13 @@ void MyDemo::create_shader_table () {
     // NOTE(omid):
     /*
         Shader table layout:
-        Entry 0 - raygen program
-        Entry 1 - Miss program
-        Entry 2 - Hit program for triangle 0
-        Entry 3 - Hit program for plane
-        Entry 4 - Hit program for triangle 1
-        Entry 5 - Hit program for triangle 2
+        Entry 0     - raygen program
+        Entry 1     - Miss program for primary ray
+        Entry 2     - Miss program for shadow ray
+        Entry 3,4   - Hit programs for triangle 0 (primary followed by shadow)
+        Entry 5,6   - Hit programs for plane (primary followed by shadow)
+        Entry 7,8   - Hit programs for triangle 1 (primary followed by shadow)
+        Entry 9,10  - Hit programs for triangle 2 (primary followed by shadow)
 
         Note 1:
         All entries in the shader-table must have the same size,
@@ -822,14 +865,14 @@ void MyDemo::create_shader_table () {
         raygen program requires the largest size: sizeof(program identifier) + 8 bytes for a descriptor table
 
         Note 2:
-        The entry size must be aligned up to D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT
+        The entry size must be aligned up to D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT aka 32 bytes
     */
 
     // -- calculate the size and create the buffer:
     shader_table_entry_size_ = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
-    shader_table_entry_size_ += 8; // raygen descriptor table
+    shader_table_entry_size_ += 8; // hit shader cbuffer descrptr
     shader_table_entry_size_ = ALIGN_TO(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT, shader_table_entry_size_);
-    uint32_t total_entry_size = 6 * shader_table_entry_size_;
+    uint32_t total_entry_size = 11 * shader_table_entry_size_;
 
     // -- for simplicity we create the shader-table on upload heap but you would create it on default heap
     shader_table_ = create_buffer(dev_,
@@ -848,33 +891,54 @@ void MyDemo::create_shader_table () {
     uint64_t heap_start_ = srv_uav_heap_->GetGPUDescriptorHandleForHeapStart().ptr;
     *(uint64_t *)(data + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = heap_start_;
 
-    // -- Entry 1: miss program:
+    // -- Entry 1: primary ray miss program:
     memcpy(data + shader_table_entry_size_, rtpso_props->GetShaderIdentifier(MissShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
 
-    // -- Entry 2: Triangle 0 Hit program, ShaderId and Cbuffer data:
-    uint8_t * entry2 = data + shader_table_entry_size_ * 2; // +2 skips the raygen and miss entries
-    memcpy(entry2, rtpso_props->GetShaderIdentifier(TriangleHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-    uint8_t * cb_desc = entry2 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // skip ShaderId to get to the location of cbuffer entry
+    // -- Entry 2: shadow ray miss program:
+    memcpy(data + shader_table_entry_size_ * 2, rtpso_props->GetShaderIdentifier(ShadowMiss), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    // -- Entry 3: Triangle 0 primary ray hit program, (ShaderId and Cbuffer data):
+    uint8_t * entry3 = data + shader_table_entry_size_ * 3;
+    memcpy(entry3, rtpso_props->GetShaderIdentifier(TriangleHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    uint8_t * cb_desc = entry3 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // skip ShaderId to get to the location of cbuffer entry
     assert(0 == ((uint64_t)cb_desc % 8)); // root descriptor must be stored at an 8-byte aligned address
     *(D3D12_GPU_VIRTUAL_ADDRESS *)cb_desc = cbuffers_[0]->GetGPUVirtualAddress();
 
-    // -- Entry 3: Plane hit program, ShaderId only:
-    uint8_t * entry3 = data + shader_table_entry_size_ * 3; // +3 skips the raygen, miss, and triangle 0 entries
-    memcpy(entry3, rtpso_props->GetShaderIdentifier(PlaneHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-
-    // -- Entry 4: Triangle 1 Hit. ShaderId and Cbuffer data:
+    // -- Entry 4: Triangle 0 shadow ray hit program, (ShaderId only):
     uint8_t * entry4 = data + shader_table_entry_size_ * 4;
-    memcpy(entry4, rtpso_props->GetShaderIdentifier(TriangleHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-    cb_desc = entry4 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // adding ShaderId size gets us to the location of cbuffer entry
+    memcpy(entry4, rtpso_props->GetShaderIdentifier(ShadowHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    // -- Entry 5: primary ray, Plane hit program, (ShaderId and the TLAS SRV):
+    uint8_t * entry5 = data + shader_table_entry_size_ * 5;
+    memcpy(entry5, rtpso_props->GetShaderIdentifier(PlaneHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    *(uint64_t *)(entry5 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = // SRV comes directly after ShaderId
+        heap_start_ + dev_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    // -- Entry 6: shadow ray in plane hit program, (ShaderId only):
+    uint8_t * entry6 = data + shader_table_entry_size_ * 6;
+    memcpy(entry6, rtpso_props->GetShaderIdentifier(ShadowHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    // -- Entry 7: Triangle 1 primary ray hit programs, (ShaderId and Cbuffer data):
+    uint8_t * entry7 = data + shader_table_entry_size_ * 7;
+    memcpy(entry7, rtpso_props->GetShaderIdentifier(TriangleHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    cb_desc = entry7 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // adding ShaderId size gets us to the location of cbuffer entry
     assert(0 == ((uint64_t)cb_desc % 8)); // root descriptor must be stored at an 8-byte aligned address
     *(D3D12_GPU_VIRTUAL_ADDRESS *)cb_desc = cbuffers_[1]->GetGPUVirtualAddress();
 
-    // -- Entry 5: Triangle 2 Hit. ShaderId and Cbuffer data:
-    uint8_t * entry5 = data + shader_table_entry_size_ * 5;
-    memcpy(entry5, rtpso_props->GetShaderIdentifier(TriangleHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-    cb_desc = entry5 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // adding ShaderId size gets us to the location of cbuffer entry
+    // -- Entry 8: Triangle 1 shadow ray hit program, (ShaderId only):
+    uint8_t * entry8 = data + shader_table_entry_size_ * 8;
+    memcpy(entry8, rtpso_props->GetShaderIdentifier(ShadowHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    // -- Entry 9: Triangle 2 primary ray hit programs, (ShaderId and Cbuffer data):
+    uint8_t * entry9 = data + shader_table_entry_size_ * 9;
+    memcpy(entry9, rtpso_props->GetShaderIdentifier(TriangleHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    cb_desc = entry9 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES; // adding ShaderId size gets us to the location of cbuffer entry
     assert(0 == ((uint64_t)cb_desc % 8)); // root descriptor must be stored at an 8-byte aligned address
     *(D3D12_GPU_VIRTUAL_ADDRESS *)cb_desc = cbuffers_[2]->GetGPUVirtualAddress();
+
+    // -- Entry 10: Triangle 2 shadow ray hit program, (ShaderId only):
+    uint8_t * entry10 = data + shader_table_entry_size_ * 10;
+    memcpy(entry10, rtpso_props->GetShaderIdentifier(ShadowHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
 
     shader_table_->Unmap(0, nullptr);
 }
@@ -992,13 +1056,13 @@ void MyDemo::OnFrameRender () {
     size_t miss_offset = 1 * shader_table_entry_size_;
     desc.MissShaderTable.StartAddress = shader_table_->GetGPUVirtualAddress() + miss_offset;
     desc.MissShaderTable.StrideInBytes = shader_table_entry_size_;
-    desc.MissShaderTable.SizeInBytes = shader_table_entry_size_; // only a single miss entry
+    desc.MissShaderTable.SizeInBytes = shader_table_entry_size_ * 2; // 2 miss entries
 
-    // -- hit is the third entry in the shader table:
-    size_t hit_offset = 2 * shader_table_entry_size_;
+    // -- hit is the fourth entry in the shader table:
+    size_t hit_offset = 3 * shader_table_entry_size_;
     desc.HitGroupTable.StartAddress = shader_table_->GetGPUVirtualAddress() + hit_offset;
     desc.HitGroupTable.StrideInBytes = shader_table_entry_size_;
-    desc.HitGroupTable.SizeInBytes = 4 * shader_table_entry_size_; // hit group table contains 4 entries
+    desc.HitGroupTable.SizeInBytes = shader_table_entry_size_ * 8; // 8 hit entries: 4 instance0, 2 instance1, 2 instance2
 
     // -- bind the empty root sig (because we're not using a global root signature):
     cmdlist_->SetComputeRootSignature(empty_root_sig_);

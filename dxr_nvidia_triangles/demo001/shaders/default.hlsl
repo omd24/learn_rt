@@ -46,8 +46,8 @@ void raygen () {
     RayPayload payload;
     TraceRay(
         g_raytracing_scene,
-        0 /*ray flags*/, 0xFF /* no object culling */, 0 /*ray index*/,
-        1 /* MultiplierForGeometryContributionToShaderIndex */, 0,
+        0 /*ray flags*/, 0xFF /* no object culling */, 0 /* ray index aka "RayContributionToHitGroupIndex" */,
+        2 /* MultiplierForGeometryContributionToShaderIndex */, 0 /* MissShaderIndex */,
         ray, payload
     );
 
@@ -67,7 +67,7 @@ void chs_triangle (inout RayPayload payload, in BuiltInTriangleIntersectionAttri
         attribs.barycentrics.y
     );
 
-    uint instance_id = InstanceID();
+    uint instance_id = InstanceID(); // not used now
     payload.color = A * barycentrics.x + B * barycentrics.y + C * barycentrics.z;
 }
 /*
@@ -87,7 +87,41 @@ void chs_old (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes
         
 }
 */
+struct ShadowPayload {
+    bool hit;
+};
 [shader("closesthit")]
 void chs_plane (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes attribs) {
-    payload.color = 0.9f;
+    float hit_t = RayTCurrent(); // paramteric distance (t) along ray dir between ray's origin and intersection point
+    float3 ray_dir_ws = WorldRayDirection(); // WS dir of incoming ray (value passed to TraceRay in raygen)
+    float3 ray_origin_ws = WorldRayOrigin(); // WS origin of incoming ray (value passed to TraceRay in raygen)
+    
+    // -- WS hit position:
+    float3 pos_ws = ray_origin_ws + hit_t * ray_dir_ws;
+
+    // -- fire a shadow ray:
+    // -- NOTE! direction is hard-coded here but we could fetch it from a cbuffer
+    RayDesc ray;
+    ray.Origin = pos_ws;
+    ray.Direction = normalize(float3(0.5, 0.5, -0.5));
+    ray.TMin = 0.01;
+    ray.TMax = 100000;
+    ShadowPayload shadow_payload;
+    TraceRay(
+        g_raytracing_scene,
+        0 /*ray flags*/, 0xFF /* no object culling */, 1 /* ray index aka "RayContributionToHitGroupIndex" */,
+        0 /* MultiplierForGeometryContributionToShaderIndex */, 1 /* MissShaderIndex */,
+        ray, payload
+    );
+
+    float factor = shadow_payload.hit ? 0.1 : 1.0;
+    payload.color = float4(0.9f, 0.9f, 0.9f, 1.0f) * factor;
+}
+[shader("closesthit")]
+void shadow_chs (inout ShadowPayload payload, in BuiltInTriangleIntersectionAttributes attribs) {
+    payload.hit = true;
+}
+[shader("miss")]
+void shadow_miss (inout ShadowPayload payload) {
+    payload.hit = false;
 }
