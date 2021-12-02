@@ -354,7 +354,7 @@ create_top_level_as (
          // -- InstanceContributionToHitGroupIndex is offset inside shader table,
          // -- it's needed bc we use different cbuffer per instance:
          // -- +1 because the plane takes an additional entry in the shader table (refer to the docx file)
-        inst_desc[i].InstanceContributionToHitGroupIndex = (i + 2) * 2;
+        inst_desc[i].InstanceContributionToHitGroupIndex = (i * 2) + 2;
         inst_desc[i].Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
         mat4 mat = transpose(transforms[i]); // glm is column major, DXR expects row major transforms
         memcpy(inst_desc[i].Transform, &mat, sizeof(inst_desc[i].Transform));
@@ -822,9 +822,9 @@ void MyDemo::create_rtpso () {
     // -- bind payload size to all programs (12,13):
     ShaderConfig primary_shader_cfg(sizeof(float) * 2, sizeof(float) * 3);
     subobjs[index] = primary_shader_cfg.Subobject; // 12 shader cfg
-    uint32_t shader_cfg_index = index++; // 12
+    uint32_t primary_shader_cfg_index = index++; // 12
     WCHAR const * primary_shader_exports [] = {RayGenShader, MissShader, TriangleChs, PlaneChs, ShadowMiss, ShadowChs};
-    ExportAssociation primary_cfg_assoc(primary_shader_exports, _countof(primary_shader_exports), &(subobjs[shader_cfg_index]));
+    ExportAssociation primary_cfg_assoc(primary_shader_exports, _countof(primary_shader_exports), &(subobjs[primary_shader_cfg_index]));
     subobjs[index++] = primary_cfg_assoc.Subobject; // 13 associate shader config to all shaders and hit groups
 
     // -- create pipeline cfg

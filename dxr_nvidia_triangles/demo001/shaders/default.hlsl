@@ -111,7 +111,7 @@ void chs_plane (inout RayPayload payload, in BuiltInTriangleIntersectionAttribut
         g_raytracing_scene,
         0 /*ray flags*/, 0xFF /* no object culling */, 1 /* ray index aka "RayContributionToHitGroupIndex" */,
         0 /* MultiplierForGeometryContributionToShaderIndex */, 1 /* MissShaderIndex */,
-        ray, payload
+        ray, shadow_payload
     );
 
     float factor = shadow_payload.hit ? 0.1 : 1.0;
