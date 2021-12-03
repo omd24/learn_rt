@@ -213,12 +213,7 @@ create_plane_vb (ID3D12Device5Ptr dev) {
     buffer->Unmap(0, nullptr);
     return buffer;
 }
-struct AccelerationStructureBuffers {
-    ID3D12ResourcePtr Scratch;
-    ID3D12ResourcePtr Result;
-    ID3D12ResourcePtr InstanceDesc; // only for Top-Level AS
-};
-static AccelerationStructureBuffers
+static MyDemo::AccelerationStructureBuffers
 create_bottom_level_as (
     ID3D12Device5Ptr dev,
     ID3D12GraphicsCommandList4Ptr cmdlist,
@@ -251,7 +246,7 @@ create_bottom_level_as (
 
     // -- create the buffers, they need to support UAV,
     // -- and since we're gonna use them immediately, create them with an unordererd-access state:
-    AccelerationStructureBuffers buffers = {};
+    MyDemo::AccelerationStructureBuffers buffers = {};
     buffers.Scratch = create_buffer(
         dev,
         info.ScratchDataSizeInBytes,
@@ -283,16 +278,19 @@ create_bottom_level_as (
 
     return buffers;
 }
-static AccelerationStructureBuffers
-create_top_level_as (
+void
+build_top_level_as (
     ID3D12Device5Ptr dev,
     ID3D12GraphicsCommandList4Ptr cmdlist,
     ID3D12ResourcePtr bottom_level_as[2], // a single trinagle, a trinagle plus a plane
-    uint64_t & tlas_size
+    uint64_t & tlas_size,
+    float rotation,
+    bool update,
+    MyDemo::AccelerationStructureBuffers & buffers
 ) {
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
     inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-    inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
+    inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
     inputs.NumDescs = 3; // three triangles
     inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
 
@@ -300,45 +298,51 @@ create_top_level_as (
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info = {};
     dev->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
 
-    // -- create the buffers:
-    AccelerationStructureBuffers buffers = {};
-    buffers.Scratch = create_buffer(
-        dev,
-        info.ScratchDataSizeInBytes,
-        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        DefaultHeapProps
-    );
-    buffers.Result = create_buffer(
-        dev,
-        info.ResultDataMaxSizeInBytes,
-        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-        D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
-        DefaultHeapProps
-    );
+    if (update) {
+        D3D12_RESOURCE_BARRIER uav_barrier = {};
+        uav_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+        uav_barrier.UAV.pResource = buffers.Result;
+        cmdlist->ResourceBarrier(1, &uav_barrier);
+    } else {
+        // -- create the buffers:
+        buffers.Scratch = create_buffer(
+            dev,
+            info.ScratchDataSizeInBytes,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            DefaultHeapProps
+        );
+        buffers.Result = create_buffer(
+            dev,
+            info.ResultDataMaxSizeInBytes,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
+            DefaultHeapProps
+        );
+        buffers.InstanceDesc = create_buffer(
+            dev,
+            sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * 3, // three instances
+            D3D12_RESOURCE_FLAG_NONE,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            UploadHeapProps
+        );
+        tlas_size = info.ResultDataMaxSizeInBytes;
+    }
 
-    // -- output size:
-    tlas_size = info.ResultDataMaxSizeInBytes;
-
-    // NOTE(omid): InstanceDesc should be inside a buffer 
-    // -- create and map the corresponding buffer:
-    buffers.InstanceDesc = create_buffer(
-        dev,
-        sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * 3, // three instances
-        D3D12_RESOURCE_FLAG_NONE,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        UploadHeapProps
-    );
+    // -- map the InstanceDesc buffer
     D3D12_RAYTRACING_INSTANCE_DESC * inst_desc = nullptr;
     buffers.InstanceDesc->Map(0, nullptr, (void **)&inst_desc);
+
+    assert(inst_desc);
 
     // -- initialize the InstanceDesc (three instances)
     ZeroMemory(inst_desc, sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * 3);
 
     mat4 transforms[3];
     transforms[0] = mat4(1.0f);
-    transforms[1] = translate(mat4(1.0f), vec3(-2, 0, 0));
-    transforms[2] = translate(mat4(1.0f), vec3(2, 0, 0));
+    mat4 rotation_mat = eulerAngleY(rotation);
+    transforms[1] = translate(mat4(1.0f), vec3(-2, 0, 0)) * rotation_mat;
+    transforms[2] = translate(mat4(1.0f), vec3(2, 0, 0)) * rotation_mat;
 
     // -- first instance desc describes "triangle plus plane" instance:
     inst_desc[0].InstanceID = 0;
@@ -371,15 +375,19 @@ create_top_level_as (
     tlas_desc.DestAccelerationStructureData = buffers.Result->GetGPUVirtualAddress();
     tlas_desc.ScratchAccelerationStructureData = buffers.Scratch->GetGPUVirtualAddress();
 
+    // -- if this is an update operation, set the "Source" buffer and add PERFORM_UPDATE flag
+    if (update) {
+        tlas_desc.Inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
+        tlas_desc.SourceAccelerationStructureData = buffers.Result->GetGPUVirtualAddress();
+    }
+
     cmdlist->BuildRaytracingAccelerationStructure(&tlas_desc, 0, nullptr);
 
     // -- we need to insert a UAV barrier before using the AS in raytracing operation:
-    D3D12_RESOURCE_BARRIER uav_barrier = {};
-    uav_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-    uav_barrier.UAV.pResource = buffers.Result;
-    cmdlist->ResourceBarrier(1, &uav_barrier);
-
-    return buffers;
+    D3D12_RESOURCE_BARRIER barrier = {};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    barrier.UAV.pResource = buffers.Result;
+    cmdlist->ResourceBarrier(1, &barrier);
 }
 
 #pragma endregion Creating Acceleration Structure
@@ -708,10 +716,14 @@ void MyDemo::end_frame (uint32_t rtv_idx) {
     swapchain_->Present(0, 0);
 
     // -- make sure new back buffer is ready
-    if (fence_value_ > DefaultSwapchainBufferCount) {
-        fence_->SetEventOnCompletion(fence_value_ - DefaultSwapchainBufferCount + 1, fence_event_);
-        WaitForSingleObject(fence_event_, INFINITE);
-    }
+    //if (fence_value_ > DefaultSwapchainBufferCount) {
+    //    fence_->SetEventOnCompletion(fence_value_ - DefaultSwapchainBufferCount + 1, fence_event_);
+    //    WaitForSingleObject(fence_event_, INFINITE);
+    //}
+
+    // -- TLAS resources are not double buffered, so we need to update them:
+    fence_->SetEventOnCompletion(fence_value_, fence_event_);
+    WaitForSingleObject(fence_event_, INFINITE);
 
     // -- prepare cmdlist for next frame:
     uint32_t buffer_idx = swapchain_->GetCurrentBackBufferIndex();
@@ -721,7 +733,7 @@ void MyDemo::end_frame (uint32_t rtv_idx) {
 
 // ==============================================================================================================
 
-void MyDemo::create_acceleration_structure () {
+void MyDemo::create_acceleration_structures () {
     vertex_buffers_[0] = create_triangle_vb(dev_);
     vertex_buffers_[1] = create_plane_vb(dev_);
     AccelerationStructureBuffers bottom_level_buffers[2];
@@ -736,7 +748,7 @@ void MyDemo::create_acceleration_structure () {
     bottom_level_as_[1] = bottom_level_buffers[1].Result;
 
     // -- create the TLAS:
-    AccelerationStructureBuffers top_level_buffers = create_top_level_as(dev_, cmdlist_, bottom_level_as_, tlas_size_);
+    build_top_level_as(dev_, cmdlist_, bottom_level_as_, tlas_size_, 0, false, top_level_buffers_);
 
     // -- we don't have any resource lifetime management so we flush and sync here
     // -- if we had resource lifetime mgmt we could submit list whenever we like
@@ -745,9 +757,6 @@ void MyDemo::create_acceleration_structure () {
     WaitForSingleObject(fence_event_, INFINITE);
     uint32_t buffer_index = swapchain_->GetCurrentBackBufferIndex();
     cmdlist_->Reset(FrameObjects_[0].cmdalloc_, nullptr);
-
-    // -- store the AS final (aka result) buffers. The rest of the buffers will be released once we exit the function
-    top_level_as_ = top_level_buffers.Result;
 }
 
 // ==============================================================================================================
@@ -984,7 +993,7 @@ void MyDemo::create_shader_resources () {
     D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
     srv_desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
     srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srv_desc.RaytracingAccelerationStructure.Location = top_level_as_->GetGPUVirtualAddress();
+    srv_desc.RaytracingAccelerationStructure.Location = top_level_buffers_.Result->GetGPUVirtualAddress();
     D3D12_CPU_DESCRIPTOR_HANDLE hcpu_srv = srv_uav_heap_->GetCPUDescriptorHandleForHeapStart();
     hcpu_srv.ptr += dev_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     dev_->CreateShaderResourceView(nullptr, &srv_desc, hcpu_srv);
@@ -1032,7 +1041,7 @@ void MyDemo::create_cbuffers () {
 
 void MyDemo::OnLoad (HWND hwnd, uint32_t w, uint32_t h) {
     init_dxr(hwnd, w, h);
-    create_acceleration_structure();
+    create_acceleration_structures();
     create_rtpso();
     create_shader_resources();
     create_cbuffers();
@@ -1040,6 +1049,9 @@ void MyDemo::OnLoad (HWND hwnd, uint32_t w, uint32_t h) {
 }
 void MyDemo::OnFrameRender () {
     uint32_t rtv_idx = begin_frame();
+
+    build_top_level_as(dev_, cmdlist_, bottom_level_as_, tlas_size_, rotation_, true, top_level_buffers_);
+    rotation_ += 0.005f;
 
     // -- raytrace:
     resource_barrier(cmdlist_, output_, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
