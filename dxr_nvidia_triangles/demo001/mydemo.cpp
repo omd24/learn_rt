@@ -278,7 +278,7 @@ create_bottom_level_as (
 
     return buffers;
 }
-void
+static void
 build_top_level_as (
     ID3D12Device5Ptr dev,
     ID3D12GraphicsCommandList4Ptr cmdlist,
@@ -721,7 +721,9 @@ void MyDemo::end_frame (uint32_t rtv_idx) {
     //    WaitForSingleObject(fence_event_, INFINITE);
     //}
 
-    // -- TLAS resources are not double buffered, so we need to update them:
+    // -- TLAS resources are not double buffered, 
+    // -- so we need incremental sync to update them, aka
+    // -- the term  - DefaultSwapchainBufferCount + 1 is not working now:
     fence_->SetEventOnCompletion(fence_value_, fence_event_);
     WaitForSingleObject(fence_event_, INFINITE);
 
