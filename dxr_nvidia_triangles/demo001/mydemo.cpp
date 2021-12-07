@@ -899,8 +899,8 @@ void MyDemo::create_shader_table () {
 
     // -- Entry 0: raygen program ID and descriptor data:
     memcpy(data, rtpso_props->GetShaderIdentifier(RayGenShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-    uint64_t heap_start_ = srv_uav_heap_->GetGPUDescriptorHandleForHeapStart().ptr;
-    *(uint64_t *)(data + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = heap_start_;
+    uint64_t heap_start = srv_uav_heap_->GetGPUDescriptorHandleForHeapStart().ptr;
+    *(uint64_t *)(data + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = heap_start;
 
     // -- Entry 1: primary ray miss program:
     memcpy(data + shader_table_entry_size_, rtpso_props->GetShaderIdentifier(MissShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
@@ -923,7 +923,7 @@ void MyDemo::create_shader_table () {
     uint8_t * entry5 = data + shader_table_entry_size_ * 5;
     memcpy(entry5, rtpso_props->GetShaderIdentifier(PlaneHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
     *(uint64_t *)(entry5 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = // SRV comes directly after ShaderId
-        heap_start_ + dev_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        heap_start + dev_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
     // -- Entry 6: shadow ray in plane hit program, (ShaderId only):
     uint8_t * entry6 = data + shader_table_entry_size_ * 6;

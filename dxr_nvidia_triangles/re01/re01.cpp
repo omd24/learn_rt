@@ -580,7 +580,9 @@ struct HitProgram {
         Desc.AnyHitShaderImport = ahs;
         Desc.ClosestHitShaderImport = chs;
         Desc.HitGroupExport = ExportName.c_str();
+
         Subobj.pDesc = &Desc;
+        Subobj.Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
     }
 };
 
@@ -751,17 +753,153 @@ void MyDemo::create_acceleration_structures () {
 
 void MyDemo::create_rtpso () {
 
-    ...
+    // subobjs:
+    /*
+        1 for DXIL library
+        3 for Hit Groups (TRi, Plane, Shadow)
+        2 for Rygn root sig and subobj assoc
+        2 for Tri hit-prog root sig and subobj assoc
+        2 for Plane Hit-prog root sig and subobj assoc
+        2 for shadow prog and miss root sig and subobj assoc
+        2 for shader config (shared between all progs) and its assoc
+        1 for pipeline cfg
+        1 for global root sig
+    */
+    std::array<D3D12_STATE_SUBOBJECT, 16> subobjs;
+    uint32_t index = 0;
 
+    DxilLibrary dl = create_dxil_library();
+    subobjs[index++] = dl.Subobj;
 
+    HitProgram tri_hp(nullptr, TriangleChs, TriangleHitGroup);
+    subobjs[index++] = tri_hp.Subobj;
+
+    HitProgram plane_hp(nullptr, PlaneChs, PlaneHitGroup);
+    subobjs[index++] = plane_hp.Subobj;
+
+    HitProgram shadow_hp(nullptr, ShadowChs, ShadowHitGroup);
+    subobjs[index++] = shadow_hp.Subobj;
+
+    LocalRootSig rygn(dev_, create_raygen_root_sig_desc().desc);
+    subobjs[index] = rygn.Subobj;
+    uint32_t rygn_index = index++;
+    ExportAssociation rygn_assoc(&RayGenShader, 1, &subobjs[rygn_index]);
+    subobjs[index++] = rygn_assoc.Subobj;
+
+    LocalRootSig tri(dev_, create_tri_hit_root_sig_desc().desc);
+    subobjs[index] = tri.Subobj;
+    uint32_t tri_index = index++;
+    ExportAssociation tri_assoc(&TriangleChs, 1, &subobjs[tri_index]);
+    subobjs[index++] = tri_assoc.Subobj;
+
+    LocalRootSig plane(dev_, create_plane_root_sig_desc().desc);
+    subobjs[index] = plane.Subobj;
+    uint32_t plane_index = index++;
+    ExportAssociation plane_assoc(&PlaneChs, 1, &subobjs[plane_index]);
+    subobjs[index++] = plane_assoc.Subobj;
+
+    D3D12_ROOT_SIGNATURE_DESC empty_dsc = {};
+    empty_dsc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+    LocalRootSig empty(dev_, empty_dsc);
+    subobjs[index] = empty.Subobj;
+    uint32_t empty_index = index++;
+    WCHAR const * empty_exports[] = {MissShader, ShadowChs, ShadowMiss};
+    ExportAssociation empty_assoc(empty_exports, _countof(empty_exports), &subobjs[empty_index]);
+    subobjs[index++] = empty_assoc.Subobj;
+
+    ShaderConfig shader_cfg(sizeof(float) * 2, sizeof(float) * 3);
+    subobjs[index] = shader_cfg.Subobj;
+    uint32_t shader_cfg_index = index++;
+    WCHAR const * shader_exports[] = {RayGenShader, MissShader, TriangleChs, PlaneChs, ShadowMiss, ShadowChs};
+    ExportAssociation cfg_assoc(shader_exports, _countof(shader_exports), &subobjs[shader_cfg_index]);
+    subobjs[index++] = cfg_assoc.Subobj;
+
+    PipelineConfig cfg(2);
+    subobjs[index++] = cfg.Subobj;
+
+    GlobalRootSig root_sig(dev_, {});
+    empty_root_sig_ = root_sig.RootSig;
+    subobjs[index++] = root_sig.Subobj;
+
+    assert(16 == index);
+    
+    D3D12_STATE_OBJECT_DESC desc = {};
+    desc.NumSubobjects = index;
+    desc.pSubobjects = subobjs.data();
+    desc.Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
+    D3D_CALL(dev_->CreateStateObject(&desc, IID_PPV_ARGS(&rtpso_)));
 }
 
 // ==============================================================================================================
 
 void MyDemo::create_shader_table () {
 
-    ...
+    // shader table layout:
+    /*
+        Entry 0         rygn
+        Entry 1         miss0 (primary)
+        Entry 2         miss1 (shadow)
+        Entry 3,4       tri0
+        Entry 5,6       plane
+        Entry 7,8       tri1
+        Entry 9,10      tri2
+    */
 
+    shader_table_entry_size_ = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    shader_table_entry_size_ += 8; // cbuffer descrptr
+    shader_table_entry_size_ = ALIGN_TO(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT, shader_table_entry_size_);
+    uint32_t total_size = 11 * shader_table_entry_size_;
+
+    shader_table_ = create_buffer(dev_, total_size, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
+
+    uint8_t * data = nullptr;
+    D3D_CALL(shader_table_->Map(0, nullptr, (void **)&data));
+
+    MAKE_SMART_COM_PTR(ID3D12StateObjectProperties);
+    ID3D12StateObjectPropertiesPtr rtpso_props;
+    rtpso_->QueryInterface(IID_PPV_ARGS(&rtpso_props));
+
+    memcpy(data, rtpso_props->GetShaderIdentifier(RayGenShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    uint64_t heap_start = srv_uav_heap_->GetGPUDescriptorHandleForHeapStart().ptr;
+    *(uint64_t *)(data + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = heap_start;
+
+    memcpy(data + shader_table_entry_size_, rtpso_props->GetShaderIdentifier(MissShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    memcpy(data + 2 * shader_table_entry_size_, rtpso_props->GetShaderIdentifier(ShadowMiss), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    uint8_t * e3 = data + shader_table_entry_size_ * 3;
+    memcpy(e3, rtpso_props->GetShaderIdentifier(TriangleHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    uint8_t * cb = e3 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    assert(0 == ((uint64_t)cb % 8));
+    *(D3D12_GPU_VIRTUAL_ADDRESS *)cb = cbuffers_[0]->GetGPUVirtualAddress();
+
+    uint8_t * e4 = data + shader_table_entry_size_ * 4;
+    memcpy(e4, rtpso_props->GetShaderIdentifier(ShadowHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    uint8_t * e5 = data + shader_table_entry_size_ * 5;
+    memcpy(e5, rtpso_props->GetShaderIdentifier(PlaneHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    *(uint64_t *)(e5 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) =
+        heap_start + dev_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    uint8_t * e6 = data + shader_table_entry_size_ * 6;
+    memcpy(e6, rtpso_props->GetShaderIdentifier(ShadowHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    uint8_t * e7 = data + shader_table_entry_size_ * 7;
+    memcpy(e7, rtpso_props->GetShaderIdentifier(TriangleHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    cb = e7 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    *(D3D12_GPU_VIRTUAL_ADDRESS *)cb = cbuffers_[1]->GetGPUVirtualAddress();
+
+    uint8_t * e8 = data + shader_table_entry_size_ * 8;
+    memcpy(e8, rtpso_props->GetShaderIdentifier(ShadowHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    uint8_t * e9 = data + shader_table_entry_size_ * 9;
+    memcpy(e9, rtpso_props->GetShaderIdentifier(TriangleHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    cb = e9 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    *(D3D12_GPU_VIRTUAL_ADDRESS *)cb = cbuffers_[2]->GetGPUVirtualAddress();
+
+    uint8_t * e10 = data + shader_table_entry_size_ * 10;
+    memcpy(e10, rtpso_props->GetShaderIdentifier(ShadowHitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    shader_table_->Unmap(0, nullptr);
 }
 
 // ==============================================================================================================
