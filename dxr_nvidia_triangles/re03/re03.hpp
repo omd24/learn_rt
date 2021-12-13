@@ -2,6 +2,7 @@
 
 #include "demo_framework.hpp"
 
+using U8 = uint8_t;
 using U32 = uint32_t;
 using U64 = uint64_t;
 
@@ -32,9 +33,16 @@ private:
     HeapData rtv_heap_;
     static const U32 rtv_heap_size_ = 3;
 
+    ID3D12ResourcePtr vb_;
+    ID3D12ResourcePtr tlas_;
+    ID3D12ResourcePtr blas_;
+    U64 tlas_size_ = 0;
+    
     void init_dxr (HWND wnd, U32 w, U32 h);
     U32 begin_frame ();
     void end_frame (U32 rtv_index);
+
+    void create_ass ();
 
 public:
     void OnLoad (HWND wnd, uint32_t w, uint32_t h) override;

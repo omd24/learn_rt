@@ -112,7 +112,154 @@ submit_cmdlist (ID3D12GraphicsCommandList4Ptr cmdlist, ID3D12CommandQueuePtr cmd
     return fence_value;
 }
 
+static D3D12_HEAP_PROPERTIES const UploadHeapProps = {
+    .Type = D3D12_HEAP_TYPE_UPLOAD,
+    .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+    .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+    .CreationNodeMask = 0,
+    .VisibleNodeMask = 0
+};
+static D3D12_HEAP_PROPERTIES const DefaultHeapProps = {
+    .Type = D3D12_HEAP_TYPE_DEFAULT,
+    .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+    .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+    .CreationNodeMask = 0,
+    .VisibleNodeMask = 0
+};
 
+static ID3D12ResourcePtr
+create_buffer (
+    ID3D12Device5Ptr dev, U64 size, D3D12_RESOURCE_FLAGS flags, D3D12_RESOURCE_STATES init_state, D3D12_HEAP_PROPERTIES const & prop
+) {
+    D3D12_RESOURCE_DESC desc = {
+        .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+        .Alignment = 0,
+        .Width = size,
+        .Height = 1,
+        .DepthOrArraySize = 1,
+        .MipLevels = 1,
+        .Format = DXGI_FORMAT_UNKNOWN,
+        .SampleDesc = {.Count = 1, .Quality = 0},
+        .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        .Flags = flags
+    };
+    ID3D12ResourcePtr ret;
+    D3D_CALL(dev->CreateCommittedResource(&prop, D3D12_HEAP_FLAG_NONE, &desc, init_state, nullptr, IID_PPV_ARGS(&ret)));
+    return ret;
+}
+static ID3D12ResourcePtr
+create_triangle_vb (ID3D12Device5Ptr dev) {
+    vec3 const vertices [] = {
+        vec3(0, 1, 0),
+        vec3(0.87f, -.5f, 0),
+        vec3(-0.87f, -.5f, 0)
+    };
+    ID3D12ResourcePtr ret =
+        create_buffer(dev, sizeof(vertices), D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
+    U8 * data;
+    ret->Map(0, nullptr, (void **)&data);
+    memcpy(data, vertices, sizeof(vertices));
+    ret->Unmap(0, nullptr);
+    return ret;
+}
+
+struct AsBuffers {
+    ID3D12ResourcePtr Scratch;
+    ID3D12ResourcePtr Result;
+    ID3D12ResourcePtr InstanceDesc;
+};
+
+AsBuffers create_blas (ID3D12Device5Ptr dev, ID3D12GraphicsCommandList4Ptr cmdlist, ID3D12ResourcePtr vb) {
+    D3D12_RAYTRACING_GEOMETRY_DESC geom_desc = {
+        .Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES,
+        .Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE,
+        .Triangles = {
+            .VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT,
+            .VertexCount = 3,
+            .VertexBuffer = {.StartAddress = vb->GetGPUVirtualAddress(), .StrideInBytes = sizeof(vec3)},
+        }
+    };
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {
+        .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL,
+        .Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE,
+        .NumDescs = 1,
+        .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
+        .pGeometryDescs = &geom_desc
+    };
+
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info = {};
+    dev->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
+
+    AsBuffers ret = {
+    .Scratch = create_buffer(dev, info.ScratchDataSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, DefaultHeapProps),
+    .Result = create_buffer(dev, info.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, DefaultHeapProps)
+    };
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC as_desc = {
+        .DestAccelerationStructureData = ret.Result->GetGPUVirtualAddress(),
+        .Inputs = inputs,
+        .ScratchAccelerationStructureData = ret.Scratch->GetGPUVirtualAddress()
+    };
+    cmdlist->BuildRaytracingAccelerationStructure(&as_desc, 0, nullptr);
+
+    D3D12_RESOURCE_BARRIER uav = {
+        .Type = D3D12_RESOURCE_BARRIER_TYPE_UAV,
+        .UAV = {ret.Result}
+    };
+    cmdlist->ResourceBarrier(1, &uav);
+
+    return ret;
+}
+
+AsBuffers create_tlas (ID3D12Device5Ptr dev, ID3D12GraphicsCommandList4Ptr cmdlist, ID3D12ResourcePtr blas, U64 & size) {
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {
+        .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL,
+        .Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE,
+        .NumDescs = 1,
+        .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
+    };
+
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info = {};
+    dev->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
+
+    AsBuffers ret = {
+    .Scratch = create_buffer(dev, info.ScratchDataSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, DefaultHeapProps),
+    .Result = create_buffer(dev, info.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, DefaultHeapProps)
+    };
+
+    size = info.ResultDataMaxSizeInBytes;
+
+    ret.InstanceDesc = create_buffer(dev, sizeof(D3D12_RAYTRACING_INSTANCE_DESC), D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
+    D3D12_RAYTRACING_INSTANCE_DESC * instance_desc;
+    ret.InstanceDesc->Map(0, nullptr, (void **)&instance_desc);
+
+    instance_desc->InstanceID = 0;
+    instance_desc->InstanceContributionToHitGroupIndex = 0;
+    instance_desc->Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+    mat4 m = mat4();
+    memcpy(instance_desc->Transform, &m, sizeof(instance_desc->Transform));
+    instance_desc->AccelerationStructure = blas->GetGPUVirtualAddress();
+    instance_desc->InstanceMask = 0xff;
+
+    ret.InstanceDesc->Unmap(0, nullptr);
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC as_desc = {
+        .DestAccelerationStructureData = ret.Result->GetGPUVirtualAddress(),
+        .Inputs = inputs,
+        .ScratchAccelerationStructureData = ret.Scratch->GetGPUVirtualAddress()
+    };
+    as_desc.Inputs.InstanceDescs = ret.InstanceDesc->GetGPUVirtualAddress();
+    cmdlist->BuildRaytracingAccelerationStructure(&as_desc, 0, nullptr);
+
+    D3D12_RESOURCE_BARRIER uav = {
+        .Type = D3D12_RESOURCE_BARRIER_TYPE_UAV,
+        .UAV = {ret.Result}
+    };
+    cmdlist->ResourceBarrier(1, &uav);
+
+    return ret;
+}
 // =============================================================================================================================================
 
 
@@ -161,11 +308,25 @@ void re03::end_frame (U32 rtv_index) {
     cmdlist_->Reset(FrameObjects[buffer_index].CmdAlloc, nullptr);
 }
 
+void re03::create_ass () {
+    vb_ = create_triangle_vb(dev_);
+    AsBuffers blas_buffers = create_blas(dev_, cmdlist_, vb_);
+    AsBuffers tlas_buffers = create_tlas(dev_, cmdlist_, blas_buffers.Result, tlas_size_);
+
+    fence_value_ = submit_cmdlist(cmdlist_, cmdque_, fence_, fence_value_);
+    fence_->SetEventOnCompletion(fence_value_, fence_event_);
+    WaitForSingleObject(fence_event_, INFINITE);
+    cmdlist_->Reset(FrameObjects[0].CmdAlloc, nullptr);
+
+    tlas_ = tlas_buffers.Result;
+    blas_ = blas_buffers.Result;
+}
 
 // =============================================================================================================================================
 
 void re03::OnLoad (HWND wnd, uint32_t w, uint32_t h) {
     init_dxr(wnd, w, h);
+    create_ass();
 }
 void re03::OnFrameRender () {
     U32 rtv_index = begin_frame();
