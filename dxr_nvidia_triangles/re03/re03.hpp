@@ -38,11 +38,15 @@ private:
     ID3D12ResourcePtr blas_;
     U64 tlas_size_ = 0;
     
+    ID3D12StateObjectPtr pso_;
+    ID3D12RootSignaturePtr empty_root_sig_;
+
     void init_dxr (HWND wnd, U32 w, U32 h);
     U32 begin_frame ();
     void end_frame (U32 rtv_index);
-
     void create_ass ();
+    void create_pso ();
+
 
 public:
     void OnLoad (HWND wnd, uint32_t w, uint32_t h) override;

@@ -1,5 +1,11 @@
 #include "re03.hpp"
 
+static dxc::DxcDllSupport g_dxc_dll_helper;
+MAKE_SMART_COM_PTR(IDxcCompiler);
+MAKE_SMART_COM_PTR(IDxcLibrary);
+MAKE_SMART_COM_PTR(IDxcBlobEncoding);
+MAKE_SMART_COM_PTR(IDxcOperationResult);
+
 // =============================================================================================================================================
 
 static IDXGISwapChain3Ptr
@@ -111,6 +117,8 @@ submit_cmdlist (ID3D12GraphicsCommandList4Ptr cmdlist, ID3D12CommandQueuePtr cmd
     cmdque->Signal(fence, fence_value);
     return fence_value;
 }
+
+#pragma region AS Creation:
 
 static D3D12_HEAP_PROPERTIES const UploadHeapProps = {
     .Type = D3D12_HEAP_TYPE_UPLOAD,
@@ -260,8 +268,234 @@ AsBuffers create_tlas (ID3D12Device5Ptr dev, ID3D12GraphicsCommandList4Ptr cmdli
 
     return ret;
 }
-// =============================================================================================================================================
 
+#pragma endregion AS Creation
+
+#pragma region PSO Creation:
+
+static ID3DBlobPtr
+comiple_shader (WCHAR const * filename, WCHAR const * target) {
+    D3D_CALL(g_dxc_dll_helper.Initialize());
+    IDxcCompilerPtr compiler;
+    IDxcLibraryPtr library;
+    D3D_CALL(g_dxc_dll_helper.CreateInstance(CLSID_DxcCompiler, &compiler));
+    D3D_CALL(g_dxc_dll_helper.CreateInstance(CLSID_DxcLibrary, &library));
+
+    std::ifstream shader_file(filename);
+    if (false == shader_file.good()) {
+        MsgBox("cant open shader file");
+        return nullptr;
+    }
+
+    std::stringstream ss;
+    ss << shader_file.rdbuf();
+    std::string shader = ss.str();
+
+    IDxcBlobEncodingPtr text_blob;
+    D3D_CALL(library->CreateBlobWithEncodingFromPinned((LPBYTE)shader.c_str(), (uint32_t)shader.size(), 0, &text_blob));
+
+    IDxcOperationResultPtr result;
+    D3D_CALL(compiler->Compile(text_blob, filename, L"", target, nullptr, 0, nullptr, 0, nullptr, &result));
+
+    HRESULT hr;
+    D3D_CALL(result->GetStatus(&hr));
+    if (FAILED(hr)) {
+        IDxcBlobEncodingPtr err;
+        D3D_CALL(result->GetErrorBuffer(&err));
+        std::string log = ConvertBlobToString(err.GetInterfacePtr());
+        MsgBox("shader compile error:\n" + log);
+        return nullptr;
+    }
+
+    MAKE_SMART_COM_PTR(IDxcBlob);
+    IDxcBlobPtr blob;
+    D3D_CALL(result->GetResult(&blob));
+    return blob;
+}
+
+static ID3D12RootSignaturePtr
+create_root_sig (ID3D12Device5Ptr dev, D3D12_ROOT_SIGNATURE_DESC const & desc) {
+    ID3DBlobPtr sig;
+    ID3DBlobPtr err;
+    HRESULT hr = D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err);
+    if (FAILED(hr)) {
+        MsgBox(ConvertBlobToString(err.GetInterfacePtr()));
+        return nullptr;
+    }
+    ID3D12RootSignaturePtr ret;
+    D3D_CALL(dev->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(), IID_PPV_ARGS(&ret)));
+    return ret;
+}
+
+struct SigDesc {
+    D3D12_ROOT_SIGNATURE_DESC Desc = {};
+    std::vector<D3D12_DESCRIPTOR_RANGE> Ranges;
+    std::vector<D3D12_ROOT_PARAMETER> RootParams;
+};
+// -- create ray generation shader - local root signature:
+SigDesc create_rgs_lrs_desc () {
+    SigDesc ret = {};
+    ret.Ranges.resize(2);
+
+    ret.Ranges[0].BaseShaderRegister = 0;
+    ret.Ranges[0].NumDescriptors = 1;
+    ret.Ranges[0].RegisterSpace = 0;
+    ret.Ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    ret.Ranges[0].OffsetInDescriptorsFromTableStart = 0;
+
+    ret.Ranges[1].BaseShaderRegister = 0;
+    ret.Ranges[1].NumDescriptors = 1;
+    ret.Ranges[1].RegisterSpace = 0;
+    ret.Ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    ret.Ranges[1].OffsetInDescriptorsFromTableStart = 1;
+
+    ret.RootParams.resize(1);
+    ret.RootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    ret.RootParams[0].DescriptorTable.NumDescriptorRanges = 2;
+    ret.RootParams[0].DescriptorTable.pDescriptorRanges = ret.Ranges.data();
+
+    ret.Desc.NumParameters = 1;
+    ret.Desc.pParameters = ret.RootParams.data();
+    ret.Desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+    return ret;
+}
+
+struct DxilLibSSo {
+    D3D12_DXIL_LIBRARY_DESC DxilLibDesc = {};
+    D3D12_STATE_SUBOBJECT SSo = {};
+    ID3DBlobPtr ShaderBlob;
+    std::vector<D3D12_EXPORT_DESC> ExportDesc;
+    std::vector<std::wstring> ExportNames;
+
+    DxilLibSSo (ID3DBlobPtr blob, WCHAR const * entry_points [], U32 count) : ShaderBlob(blob) {
+        SSo.Type = D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY;
+        SSo.pDesc = &DxilLibDesc;
+        DxilLibDesc = {};
+        ExportDesc.resize(count);
+        ExportNames.resize(count);
+        if (blob) {
+            DxilLibDesc.DXILLibrary.pShaderBytecode = blob->GetBufferPointer();
+            DxilLibDesc.DXILLibrary.BytecodeLength = blob->GetBufferSize();
+            DxilLibDesc.NumExports = count;
+            DxilLibDesc.pExports = ExportDesc.data();
+            for (U32 i = 0; i < count; ++i) {
+                ExportNames[i] = entry_points[i];
+                ExportDesc[i].Name = ExportNames[i].c_str();
+                ExportDesc[i].Flags = D3D12_EXPORT_FLAG_NONE;
+                ExportDesc[i].ExportToRename = nullptr;
+            }
+        }
+    }
+};
+
+static const WCHAR * RGS = L"RGS";
+static const WCHAR * MissShader = L"Miss";
+static const WCHAR * CHS = L"CHS";
+static const WCHAR * HitGroup = L"HitGroup";
+
+static DxilLibSSo
+create_dxil_lib_sso () {
+    ID3DBlobPtr blob = comiple_shader(L"re03.hlsl", L"lib_6_3");
+    WCHAR const * entrypoints [] = {RGS, MissShader, CHS};
+    return DxilLibSSo(blob, entrypoints, _countof(entrypoints));
+}
+
+struct HitProgramSSo {
+    std::wstring ExportName;
+    D3D12_HIT_GROUP_DESC Desc;
+    D3D12_STATE_SUBOBJECT SSo;
+
+    HitProgramSSo (LPCWSTR ahs, LPCWSTR chs, std::wstring const & name) : ExportName(name) {
+        Desc = {
+            .HitGroupExport = ExportName.c_str(),
+            .AnyHitShaderImport = ahs,
+            .ClosestHitShaderImport = chs,
+        };
+
+        SSo = {
+            .Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP,
+            .pDesc = &Desc
+        };
+    }
+};
+
+struct ExportAssocSSo {
+    D3D12_STATE_SUBOBJECT SSo = {};
+    D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION Assoc = {};
+
+    ExportAssocSSo (WCHAR const * exportnames [], U32 count, D3D12_STATE_SUBOBJECT const * sso_to_associate) {
+        Assoc = {
+            .pSubobjectToAssociate = sso_to_associate,
+            .NumExports = count,
+            .pExports = exportnames,
+        };
+        SSo = {
+            .Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION,
+            .pDesc = &Assoc
+        };
+    }
+};
+
+struct LrsSSo {
+    ID3D12RootSignaturePtr RootSig;
+    ID3D12RootSignature * IPtr = nullptr;
+    D3D12_STATE_SUBOBJECT SSo;
+    LrsSSo (ID3D12Device5Ptr dev, D3D12_ROOT_SIGNATURE_DESC const & desc) {
+        RootSig = create_root_sig(dev, desc);
+        IPtr = RootSig.GetInterfacePtr();
+        SSo = {
+            .Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE,
+            .pDesc = &IPtr
+        };
+    }
+};
+
+struct GrsSSo {
+    ID3D12RootSignaturePtr RootSig;
+    ID3D12RootSignature * IPtr = nullptr;
+    D3D12_STATE_SUBOBJECT SSo;
+    GrsSSo (ID3D12Device5Ptr dev, D3D12_ROOT_SIGNATURE_DESC const & desc) {
+        RootSig = create_root_sig(dev, desc);
+        IPtr = RootSig.GetInterfacePtr();
+        SSo = {
+            .Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE,
+            .pDesc = &IPtr
+        };
+    }
+};
+
+struct ShaderCfgSSo {
+    D3D12_RAYTRACING_SHADER_CONFIG Cfg = {};
+    D3D12_STATE_SUBOBJECT SSo = {};
+    ShaderCfgSSo (U32 max_attrib_size, U32 max_payload_size) {
+        Cfg = {
+            .MaxPayloadSizeInBytes = max_payload_size,
+            .MaxAttributeSizeInBytes = max_attrib_size
+        };
+        SSo = {
+            .Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG,
+            .pDesc = &Cfg
+        };
+    }
+};
+
+struct PipelineCfgSSo {
+    D3D12_RAYTRACING_PIPELINE_CONFIG Cfg = {};
+    D3D12_STATE_SUBOBJECT SSo = {};
+    PipelineCfgSSo (U32 max_trace_recursion_depth) {
+        Cfg.MaxTraceRecursionDepth = max_trace_recursion_depth;
+        SSo = {
+            .Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG,
+            .pDesc = &Cfg
+        };
+    }
+};
+
+
+#pragma endregion PSO Creation
+
+// =============================================================================================================================================
 
 void re03::init_dxr (HWND wnd, U32 w, U32 h) {
     wnd_ = wnd;
@@ -322,11 +556,58 @@ void re03::create_ass () {
     blas_ = blas_buffers.Result;
 }
 
+void re03::create_pso () {
+    D3D12_STATE_SUBOBJECT ssos[10];
+    U32 index = 0;
+
+    DxilLibSSo dxil = create_dxil_lib_sso();
+    ssos[index++] = dxil.SSo;
+
+    HitProgramSSo hit(nullptr, CHS, HitGroup);
+    ssos[index++] = hit.SSo;
+
+    LrsSSo rgs_lrs(dev_, create_rgs_lrs_desc().Desc);
+    ssos[index] = rgs_lrs.SSo;
+    U32 rgs_lrs_index = index++;
+    ExportAssocSSo rgs_lrs_assoc(&RGS, 1, &ssos[rgs_lrs_index]);
+    ssos[index++] = rgs_lrs_assoc.SSo;
+
+    D3D12_ROOT_SIGNATURE_DESC empty_desc = {.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE};
+    LrsSSo hit_miss_lrs(dev_, empty_desc);
+    ssos[index++] = hit_miss_lrs.SSo;
+    WCHAR const * miss_hit_exports [] = {MissShader, CHS};
+    ExportAssocSSo hit_miss_lrs_assoc(miss_hit_exports, _countof(miss_hit_exports), &hit_miss_lrs.SSo);
+    ssos[index++] = hit_miss_lrs_assoc.SSo;
+
+    ShaderCfgSSo shader_cfg(sizeof(float) * 2, sizeof(float) * 1);
+    ssos[index++] = shader_cfg.SSo;
+    WCHAR const * shader_exports[] = {MissShader, CHS, RGS};
+    ExportAssocSSo shader_assoc(shader_exports, _countof(shader_exports), &shader_cfg.SSo);
+    ssos[index++] = shader_assoc.SSo;
+
+    PipelineCfgSSo cfg(0);
+    ssos[index++] = cfg.SSo;
+
+    GrsSSo grs(dev_, {});
+    ssos[index++] = grs.SSo;
+
+    empty_root_sig_ = grs.RootSig;
+
+    // -- create pso:
+    D3D12_STATE_OBJECT_DESC desc = {
+        .Type = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE,
+        .NumSubobjects = _countof(ssos),
+        .pSubobjects = ssos
+    };
+    D3D_CALL(dev_->CreateStateObject(&desc, IID_PPV_ARGS(&pso_)));
+}
+
 // =============================================================================================================================================
 
 void re03::OnLoad (HWND wnd, uint32_t w, uint32_t h) {
     init_dxr(wnd, w, h);
     create_ass();
+    create_pso();
 }
 void re03::OnFrameRender () {
     U32 rtv_index = begin_frame();
