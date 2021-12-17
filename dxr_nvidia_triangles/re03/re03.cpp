@@ -602,12 +602,38 @@ void re03::create_pso () {
     D3D_CALL(dev_->CreateStateObject(&desc, IID_PPV_ARGS(&pso_)));
 }
 
+void re03::create_sbt () {
+    sbt_entry_size_ = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    sbt_entry_size_ += 8;
+    sbt_entry_size_ = ALIGN_TO(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT, sbt_entry_size_);
+    U32 sbt_size = sbt_entry_size_ * 3;
+
+    sbt_ = create_buffer(dev_, sbt_size, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
+
+    U8 * data = nullptr;
+    D3D_CALL(sbt_->Map(0, nullptr, (void **)&data));
+
+    MAKE_SMART_COM_PTR(ID3D12StateObjectProperties);
+    ID3D12StateObjectPropertiesPtr pso_props;
+    pso_->QueryInterface(IID_PPV_ARGS(&pso_props));
+
+    memcpy(data, pso_props->GetShaderIdentifier(RGS), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    memcpy(data + sbt_entry_size_, pso_props->GetShaderIdentifier(MissShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    U8 * entry2 = data + sbt_entry_size_ * 2;
+    memcpy(entry2, pso_props->GetShaderIdentifier(HitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+
+    sbt_->Unmap(0, nullptr);
+}
+
 // =============================================================================================================================================
 
 void re03::OnLoad (HWND wnd, uint32_t w, uint32_t h) {
     init_dxr(wnd, w, h);
     create_ass();
     create_pso();
+    create_sbt();
 }
 void re03::OnFrameRender () {
     U32 rtv_index = begin_frame();

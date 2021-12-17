@@ -41,12 +41,15 @@ private:
     ID3D12StateObjectPtr pso_;
     ID3D12RootSignaturePtr empty_root_sig_;
 
+    ID3D12ResourcePtr sbt_;
+    U32 sbt_entry_size_;
+
     void init_dxr (HWND wnd, U32 w, U32 h);
     U32 begin_frame ();
     void end_frame (U32 rtv_index);
     void create_ass ();
     void create_pso ();
-
+    void create_sbt ();
 
 public:
     void OnLoad (HWND wnd, uint32_t w, uint32_t h) override;
