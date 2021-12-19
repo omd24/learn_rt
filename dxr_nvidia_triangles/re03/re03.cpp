@@ -245,7 +245,7 @@ AsBuffers create_tlas (ID3D12Device5Ptr dev, ID3D12GraphicsCommandList4Ptr cmdli
     instance_desc->InstanceID = 0;
     instance_desc->InstanceContributionToHitGroupIndex = 0;
     instance_desc->Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
-    mat4 m = mat4();
+    mat4 m = mat4(1.0f);
     memcpy(instance_desc->Transform, &m, sizeof(instance_desc->Transform));
     instance_desc->AccelerationStructure = blas->GetGPUVirtualAddress();
     instance_desc->InstanceMask = 0xff;
@@ -524,10 +524,12 @@ void re03::init_dxr (HWND wnd, U32 w, U32 h) {
     fence_event_ = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 }
 U32 re03::begin_frame () {
+    ID3D12DescriptorHeap * heaps [] = {srv_uav_heap_};
+    cmdlist_->SetDescriptorHeaps(_countof(heaps), heaps);
     return swc_->GetCurrentBackBufferIndex();
 }
 void re03::end_frame (U32 rtv_index) {
-    resource_barrier(cmdlist_, FrameObjects[rtv_index].SwcBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+    resource_barrier(cmdlist_, FrameObjects[rtv_index].SwcBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
     fence_value_ = submit_cmdlist(cmdlist_, cmdque_, fence_, fence_value_);
     swc_->Present(0, 0);
 
@@ -581,7 +583,7 @@ void re03::create_pso () {
 
     ShaderCfgSSo shader_cfg(sizeof(float) * 2, sizeof(float) * 1);
     ssos[index++] = shader_cfg.SSo;
-    WCHAR const * shader_exports[] = {MissShader, CHS, RGS};
+    WCHAR const * shader_exports [] = {MissShader, CHS, RGS};
     ExportAssocSSo shader_assoc(shader_exports, _countof(shader_exports), &shader_cfg.SSo);
     ssos[index++] = shader_assoc.SSo;
 
@@ -618,6 +620,9 @@ void re03::create_sbt () {
     pso_->QueryInterface(IID_PPV_ARGS(&pso_props));
 
     memcpy(data, pso_props->GetShaderIdentifier(RGS), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    //*(U64 *)(data + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = srv_uav_heap_->GetGPUDescriptorHandleForHeapStart().ptr;
+    uint64_t heapStart = srv_uav_heap_->GetGPUDescriptorHandleForHeapStart().ptr;
+    *(uint64_t*)(data + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = heapStart;
 
     memcpy(data + sbt_entry_size_, pso_props->GetShaderIdentifier(MissShader), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
 
@@ -627,19 +632,81 @@ void re03::create_sbt () {
     sbt_->Unmap(0, nullptr);
 }
 
+void re03::create_shader_resources () {
+    D3D12_RESOURCE_DESC output_texture_desc = {
+        .Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+        .Alignment = 0,
+        .Width = swc_size_.x,
+        .Height = swc_size_.y,
+        .DepthOrArraySize = 1,
+        .MipLevels = 1,
+        .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
+        .SampleDesc = {.Count = 1, .Quality = 0},
+        .Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN,
+        .Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+    };
+    D3D_CALL(dev_->CreateCommittedResource(
+        &DefaultHeapProps, D3D12_HEAP_FLAG_NONE, &output_texture_desc, D3D12_RESOURCE_STATE_COPY_SOURCE,
+        nullptr, IID_PPV_ARGS(&output_texture_)
+    ));
+
+    srv_uav_heap_ = create_descrptr_heap(dev_, 2, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, true);
+
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {
+        .ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D
+    };
+    dev_->CreateUnorderedAccessView(output_texture_, nullptr, &uav_desc, srv_uav_heap_->GetCPUDescriptorHandleForHeapStart());
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {
+        .ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE,
+        .Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        .RaytracingAccelerationStructure = {.Location = tlas_->GetGPUVirtualAddress()}
+    };
+    D3D12_CPU_DESCRIPTOR_HANDLE hcpu_srv = srv_uav_heap_->GetCPUDescriptorHandleForHeapStart();
+    hcpu_srv.ptr += dev_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    dev_->CreateShaderResourceView(nullptr /* no resource for we set target TLAS in desc */, &srv_desc, hcpu_srv);
+}
+
 // =============================================================================================================================================
 
 void re03::OnLoad (HWND wnd, uint32_t w, uint32_t h) {
     init_dxr(wnd, w, h);
     create_ass();
     create_pso();
+    create_shader_resources();
     create_sbt();
 }
 void re03::OnFrameRender () {
     U32 rtv_index = begin_frame();
-    float const cv[4] = {0.4f, 0.6f, 0.2f, 1.0f};
-    resource_barrier(cmdlist_, FrameObjects[rtv_index].SwcBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    cmdlist_->ClearRenderTargetView(FrameObjects[rtv_index].HCpuRtv, cv, 0, nullptr);
+
+    resource_barrier(cmdlist_, output_texture_, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    D3D12_DISPATCH_RAYS_DESC ray_desc = {
+        .RayGenerationShaderRecord = {
+            .StartAddress = sbt_->GetGPUVirtualAddress(),
+            .SizeInBytes = sbt_entry_size_,
+        },
+        .MissShaderTable = {
+            .StartAddress = sbt_->GetGPUVirtualAddress() + sbt_entry_size_,
+            .SizeInBytes = sbt_entry_size_,
+            .StrideInBytes = sbt_entry_size_
+        },
+        .HitGroupTable = {
+            .StartAddress = sbt_->GetGPUVirtualAddress() + 2 * sbt_entry_size_,
+            .SizeInBytes = sbt_entry_size_,
+            .StrideInBytes = sbt_entry_size_
+        },
+        .Width = swc_size_.x,
+        .Height = swc_size_.y,
+        .Depth = 1
+    };
+    cmdlist_->SetComputeRootSignature(empty_root_sig_);
+    cmdlist_->SetPipelineState1(pso_.GetInterfacePtr());
+    cmdlist_->DispatchRays(&ray_desc);
+
+    resource_barrier(cmdlist_, output_texture_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    resource_barrier(cmdlist_, FrameObjects[rtv_index].SwcBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
+    cmdlist_->CopyResource(FrameObjects[rtv_index].SwcBuffer, output_texture_);
+
     end_frame(rtv_index);
 }
 void re03::OnShutdown () {

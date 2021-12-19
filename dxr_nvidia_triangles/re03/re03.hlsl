@@ -1,7 +1,7 @@
 RaytracingAccelerationStructure g_scene : register(t0);
 RWTexture2D<float4> g_output : register(u0);
 
-float linear_to_srgb (float3 c) {
+float3 linear_to_srgb (float3 c) {
     float3 sq1 = sqrt(c);
     float3 sq2 = sqrt(sq1);
     float3 sq3 = sqrt(sq2);

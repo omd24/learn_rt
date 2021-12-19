@@ -44,12 +44,17 @@ private:
     ID3D12ResourcePtr sbt_;
     U32 sbt_entry_size_;
 
+    ID3D12ResourcePtr output_texture_;
+    ID3D12DescriptorHeapPtr srv_uav_heap_;
+    static const U32 srv_uav_heap_size_ = 2;
+
     void init_dxr (HWND wnd, U32 w, U32 h);
     U32 begin_frame ();
     void end_frame (U32 rtv_index);
     void create_ass ();
     void create_pso ();
     void create_sbt ();
+    void create_shader_resources ();
 
 public:
     void OnLoad (HWND wnd, uint32_t w, uint32_t h) override;
