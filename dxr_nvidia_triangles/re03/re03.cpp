@@ -581,13 +581,13 @@ void re03::create_pso () {
     ExportAssocSSo hit_miss_lrs_assoc(miss_hit_exports, _countof(miss_hit_exports), &hit_miss_lrs.SSo);
     ssos[index++] = hit_miss_lrs_assoc.SSo;
 
-    ShaderCfgSSo shader_cfg(sizeof(float) * 2, sizeof(float) * 1);
+    ShaderCfgSSo shader_cfg(sizeof(float) * 2, sizeof(float) * 3);
     ssos[index++] = shader_cfg.SSo;
     WCHAR const * shader_exports [] = {MissShader, CHS, RGS};
     ExportAssocSSo shader_assoc(shader_exports, _countof(shader_exports), &shader_cfg.SSo);
     ssos[index++] = shader_assoc.SSo;
 
-    PipelineCfgSSo cfg(0);
+    PipelineCfgSSo cfg(1);
     ssos[index++] = cfg.SSo;
 
     GrsSSo grs(dev_, {});
