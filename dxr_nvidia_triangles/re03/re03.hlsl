@@ -20,7 +20,7 @@ void RGS () {
     float2 crds = float2(launch_index.xy);
     float2 dims = float2(launch_dims.xy);
 
-    float2 d = ((crds/dims) * 2.0f - 1.0f);
+    float2 d = ((crds / dims) * 2.0f - 1.0f);
     float aspect_ratio = dims.x / dims.y;
 
     RayDesc ray;
@@ -55,9 +55,21 @@ void CHS (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes att
         attribs.barycentrics.y
     );
 
+    uint instance_id = InstanceID();
+
     const float3 A = float3(1, 0, 0);
     const float3 B = float3(0, 1, 0);
     const float3 C = float3(0, 0, 1);
 
-    payload.color = A * barycentrics.x + B *barycentrics.y + C * barycentrics.z;
+    switch (instance_id) {
+    case 0:
+        payload.color = A * barycentrics.x + B * barycentrics.y + C * barycentrics.z;
+        break;
+    case 1:
+        payload.color = B * barycentrics.x + C * barycentrics.y + A * barycentrics.z;
+        break;
+    case 2:
+        payload.color = C * barycentrics.x + A * barycentrics.y + B * barycentrics.z;
+        break;
+    }
 }

@@ -224,7 +224,7 @@ AsBuffers create_tlas (ID3D12Device5Ptr dev, ID3D12GraphicsCommandList4Ptr cmdli
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {
         .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL,
         .Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE,
-        .NumDescs = 1,
+        .NumDescs = 3,
         .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
     };
 
@@ -232,24 +232,31 @@ AsBuffers create_tlas (ID3D12Device5Ptr dev, ID3D12GraphicsCommandList4Ptr cmdli
     dev->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
 
     AsBuffers ret = {
-    .Scratch = create_buffer(dev, info.ScratchDataSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, DefaultHeapProps),
-    .Result = create_buffer(dev, info.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, DefaultHeapProps)
+        .Scratch = create_buffer(dev, info.ScratchDataSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, DefaultHeapProps),
+        .Result = create_buffer(dev, info.ResultDataMaxSizeInBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, DefaultHeapProps)
     };
 
     size = info.ResultDataMaxSizeInBytes;
 
-    ret.InstanceDesc = create_buffer(dev, sizeof(D3D12_RAYTRACING_INSTANCE_DESC), D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
+    ret.InstanceDesc = create_buffer(dev, sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * 3, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
     D3D12_RAYTRACING_INSTANCE_DESC * instance_desc;
     ret.InstanceDesc->Map(0, nullptr, (void **)&instance_desc);
+    memset(instance_desc, 0, sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * 3);
 
-    instance_desc->InstanceID = 0;
-    instance_desc->InstanceContributionToHitGroupIndex = 0;
-    instance_desc->Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
-    mat4 m = mat4(1.0f);
-    memcpy(instance_desc->Transform, &m, sizeof(instance_desc->Transform));
-    instance_desc->AccelerationStructure = blas->GetGPUVirtualAddress();
-    instance_desc->InstanceMask = 0xff;
+    mat4 transforms[3] = {};
+    transforms[0] = mat4(1.0f);
+    transforms[1] = translate(mat4(1.0f), vec3(-2, 0, 0));
+    transforms[2] = translate(mat4(1.0f), vec3(2, 0, 0));
 
+    for (U32 i = 0; i < 3; ++i) {
+        instance_desc[i].InstanceID = i;
+        instance_desc[i].InstanceContributionToHitGroupIndex = 0;
+        instance_desc[i].Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+        mat4 m = transpose(transforms[i]);
+        memcpy(instance_desc[i].Transform, &m, sizeof(instance_desc[i].Transform));
+        instance_desc[i].AccelerationStructure = blas->GetGPUVirtualAddress();
+        instance_desc[i].InstanceMask = 0xff;
+    }
     ret.InstanceDesc->Unmap(0, nullptr);
 
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC as_desc = {
