@@ -1,6 +1,12 @@
 RaytracingAccelerationStructure g_scene : register(t0);
 RWTexture2D<float4> g_output : register(u0);
 
+cbuffer PerFrame : register(b0){
+    float3 A[3];
+    float3 B[3];
+    float3 C[3];
+}
+
 float3 linear_to_srgb (float3 c) {
     float3 sq1 = sqrt(c);
     float3 sq2 = sqrt(sq1);
@@ -56,20 +62,5 @@ void CHS (inout RayPayload payload, in BuiltInTriangleIntersectionAttributes att
     );
 
     uint instance_id = InstanceID();
-
-    const float3 A = float3(1, 0, 0);
-    const float3 B = float3(0, 1, 0);
-    const float3 C = float3(0, 0, 1);
-
-    switch (instance_id) {
-    case 0:
-        payload.color = A * barycentrics.x + B * barycentrics.y + C * barycentrics.z;
-        break;
-    case 1:
-        payload.color = B * barycentrics.x + C * barycentrics.y + A * barycentrics.z;
-        break;
-    case 2:
-        payload.color = C * barycentrics.x + A * barycentrics.y + B * barycentrics.z;
-        break;
-    }
+    payload.color = A[instance_id] * barycentrics.x + B[instance_id] * barycentrics.y + C[instance_id] * barycentrics.z;
 }

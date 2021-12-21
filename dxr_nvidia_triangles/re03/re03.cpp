@@ -368,6 +368,20 @@ SigDesc create_rgs_lrs_desc () {
     return ret;
 }
 
+SigDesc create_hit_lrs_desc () {
+    SigDesc ret = {};
+    ret.RootParams.resize(1);
+    ret.RootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    ret.RootParams[0].Descriptor.RegisterSpace = 0;
+    ret.RootParams[0].Descriptor.ShaderRegister = 0;
+
+    ret.Desc.NumParameters = 1;
+    ret.Desc.pParameters = ret.RootParams.data();
+    ret.Desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+    return ret;
+}
+
 struct DxilLibSSo {
     D3D12_DXIL_LIBRARY_DESC DxilLibDesc = {};
     D3D12_STATE_SUBOBJECT SSo = {};
@@ -566,7 +580,7 @@ void re03::create_ass () {
 }
 
 void re03::create_pso () {
-    D3D12_STATE_SUBOBJECT ssos[10];
+    D3D12_STATE_SUBOBJECT ssos[12];
     U32 index = 0;
 
     DxilLibSSo dxil = create_dxil_lib_sso();
@@ -581,12 +595,17 @@ void re03::create_pso () {
     ExportAssocSSo rgs_lrs_assoc(&RGS, 1, &ssos[rgs_lrs_index]);
     ssos[index++] = rgs_lrs_assoc.SSo;
 
+    LrsSSo hit_lrs(dev_, create_hit_lrs_desc().Desc);
+    ssos[index] = hit_lrs.SSo;
+    U32 hit_lrs_index = index++;
+    ExportAssocSSo hit_lrs_assoc(&CHS, 1, &ssos[hit_lrs_index]);
+    ssos[index++] = hit_lrs_assoc.SSo;
+
     D3D12_ROOT_SIGNATURE_DESC empty_desc = {.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE};
-    LrsSSo hit_miss_lrs(dev_, empty_desc);
-    ssos[index++] = hit_miss_lrs.SSo;
-    WCHAR const * miss_hit_exports [] = {MissShader, CHS};
-    ExportAssocSSo hit_miss_lrs_assoc(miss_hit_exports, _countof(miss_hit_exports), &hit_miss_lrs.SSo);
-    ssos[index++] = hit_miss_lrs_assoc.SSo;
+    LrsSSo miss_lrs(dev_, empty_desc);
+    ssos[index++] = miss_lrs.SSo;
+    ExportAssocSSo miss_lrs_assoc(&MissShader, 1, &miss_lrs.SSo);
+    ssos[index++] = miss_lrs_assoc.SSo;
 
     ShaderCfgSSo shader_cfg(sizeof(float) * 2, sizeof(float) * 3);
     ssos[index++] = shader_cfg.SSo;
@@ -627,7 +646,6 @@ void re03::create_sbt () {
     pso_->QueryInterface(IID_PPV_ARGS(&pso_props));
 
     memcpy(data, pso_props->GetShaderIdentifier(RGS), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-    //*(U64 *)(data + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = srv_uav_heap_->GetGPUDescriptorHandleForHeapStart().ptr;
     uint64_t heapStart = srv_uav_heap_->GetGPUDescriptorHandleForHeapStart().ptr;
     *(uint64_t*)(data + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = heapStart;
 
@@ -635,6 +653,7 @@ void re03::create_sbt () {
 
     U8 * entry2 = data + sbt_entry_size_ * 2;
     memcpy(entry2, pso_props->GetShaderIdentifier(HitGroup), D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+    *(D3D12_GPU_VIRTUAL_ADDRESS *)(entry2 + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES) = cbuffer_->GetGPUVirtualAddress();
 
     sbt_->Unmap(0, nullptr);
 }
@@ -674,6 +693,27 @@ void re03::create_shader_resources () {
     dev_->CreateShaderResourceView(nullptr /* no resource for we set target TLAS in desc */, &srv_desc, hcpu_srv);
 }
 
+void re03::create_cbuffer () {
+    vec4 data[] = {
+        vec4(1.0, 0.0, 0.0, 1.0),
+        vec4(0.0, 1.0, 0.0, 1.0),
+        vec4(0.0, 0.0, 1.0, 1.0),
+
+        vec4(1.0, 1.0, 0.0, 1.0),
+        vec4(0.0, 1.0, 1.0, 1.0),
+        vec4(1.0, 0.0, 1.0, 1.0),
+
+        vec4(1.0, 0.0, 1.0, 1.0),
+        vec4(1.0, 1.0, 0.0, 1.0),
+        vec4(0.0, 1.0, 1.0, 1.0),
+    };
+    cbuffer_ = create_buffer(dev_, sizeof(data), D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, UploadHeapProps);
+    U8 * _ptr = nullptr;
+    D3D_CALL(cbuffer_->Map(0, nullptr, (void **)&_ptr));
+    memcpy(_ptr, data, sizeof(data));
+    cbuffer_->Unmap(0, nullptr);
+}
+
 // =============================================================================================================================================
 
 void re03::OnLoad (HWND wnd, uint32_t w, uint32_t h) {
@@ -681,6 +721,7 @@ void re03::OnLoad (HWND wnd, uint32_t w, uint32_t h) {
     create_ass();
     create_pso();
     create_shader_resources();
+    create_cbuffer();
     create_sbt();
 }
 void re03::OnFrameRender () {
